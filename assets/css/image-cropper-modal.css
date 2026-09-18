@@ -1,0 +1,324 @@
+﻿/* ==========================================================================
+   SIPALA - Lightbox Pop-up & Interactive Image Cropper Styles
+   Institutional School System - Anti AI-slop, Clean & Premium UX
+   ========================================================================== */
+
+/* 1. LIGHTBOX VIEWER POPUP */
+.sipala-lightbox-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 99990;
+    background: rgba(15, 23, 42, 0.88);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sipala-lightbox-overlay.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.sipala-lightbox-card {
+    background: #ffffff;
+    border-radius: 12px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.1);
+    max-width: 900px;
+    width: 100%;
+    max-height: 92vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transform: scale(0.95) translateY(10px);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sipala-lightbox-overlay.active .sipala-lightbox-card {
+    transform: scale(1) translateY(0);
+}
+
+.sipala-lightbox-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.sipala-lightbox-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #0f172a;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.sipala-lightbox-subtitle {
+    font-size: 12px;
+    color: #64748b;
+    margin-top: 2px;
+}
+
+.sipala-lightbox-close {
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    color: #475569;
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    cursor: pointer;
+    line-height: 1;
+    transition: all 0.15s ease;
+}
+
+.sipala-lightbox-close:hover {
+    background: #fee2e2;
+    color: #dc2626;
+    border-color: #fca5a5;
+    transform: rotate(90deg);
+}
+
+.sipala-lightbox-body {
+    padding: 16px;
+    background: #090d16;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: auto;
+    max-height: 72vh;
+}
+
+.sipala-lightbox-img {
+    max-width: 100%;
+    max-height: 68vh;
+    object-fit: contain;
+    border-radius: 6px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+    user-select: none;
+}
+
+.sipala-lightbox-footer {
+    padding: 10px 20px;
+    background: #f8fafc;
+    border-top: 1px solid #e2e8f0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #64748b;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+/* 2. INTERACTIVE IMAGE CROPPER MODAL */
+.sipala-cropper-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    background: rgba(15, 23, 42, 0.92);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 14px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sipala-cropper-overlay.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.sipala-cropper-dialog {
+    background: #1e293b;
+    color: #f8fafc;
+    border-radius: 14px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.1);
+    width: 100%;
+    max-width: 720px;
+    max-height: 94vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transform: scale(0.95);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sipala-cropper-overlay.active .sipala-cropper-dialog {
+    transform: scale(1);
+}
+
+.sipala-cropper-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    background: #0f172a;
+    border-bottom: 1px solid #334155;
+}
+
+.sipala-cropper-header h3 {
+    font-size: 16px;
+    font-weight: 700;
+    color: #f1f5f9;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sipala-cropper-header p {
+    font-size: 12px;
+    color: #94a3b8;
+    margin: 2px 0 0 0;
+}
+
+.sipala-cropper-stage {
+    position: relative;
+    width: 100%;
+    height: 380px;
+    background: #020617;
+    overflow: hidden;
+    user-select: none;
+    cursor: grab;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.sipala-cropper-stage:active {
+    cursor: grabbing;
+}
+
+.sipala-cropper-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* Crop Mask & Viewport Box */
+.sipala-crop-box-guide {
+    position: absolute;
+    box-sizing: border-box;
+    pointer-events: none;
+    border: 2px solid #38bdf8;
+    box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.72);
+}
+
+.sipala-crop-box-guide.circle {
+    border-radius: 50%;
+}
+
+.sipala-crop-box-guide::before,
+.sipala-crop-box-guide::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border: 1px dashed rgba(255, 255, 255, 0.35);
+}
+
+/* Controls Toolbar */
+.sipala-cropper-toolbar {
+    padding: 12px 20px;
+    background: #0f172a;
+    border-top: 1px solid #334155;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.sipala-cropper-zoom-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    min-width: 200px;
+}
+
+.sipala-cropper-zoom-wrap label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #cbd5e1;
+    white-space: nowrap;
+}
+
+.sipala-cropper-slider {
+    flex: 1;
+    accent-color: #38bdf8;
+    cursor: pointer;
+}
+
+.sipala-cropper-btn-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sipala-cropper-btn {
+    background: #334155;
+    color: #f8fafc;
+    border: 1px solid #475569;
+    padding: 7px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.15s ease;
+}
+
+.sipala-cropper-btn:hover {
+    background: #475569;
+    border-color: #64748b;
+}
+
+.sipala-cropper-btn.primary {
+    background: #0284c7;
+    border-color: #38bdf8;
+    color: #ffffff;
+}
+
+.sipala-cropper-btn.primary:hover {
+    background: #0369a1;
+}
+
+.sipala-cropper-btn.danger:hover {
+    background: #991b1b;
+    border-color: #ef4444;
+}
+
+/* Photo Thumbnail Hover Indication */
+.sipala-zoomable-img {
+    cursor: zoom-in;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.sipala-zoomable-img:hover {
+    transform: scale(1.03);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}

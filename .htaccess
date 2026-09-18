@@ -1,0 +1,25 @@
+# =========================================================================
+# SIPALA - Keamanan Web Server Apache (Root Directory)
+# =========================================================================
+
+# 1. Matikan Directory Browsing / Listing untuk seluruh direktori
+Options -Indexes
+
+# 2. Blokir akses langsung ke file sensitif (.sql, .bak, .env, .log, .git)
+<FilesMatch "\.(sql|bak|env|log|git.*)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# 3. Tetapkan Security Headers
+<IfModule mod_headers.c>
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set X-XSS-Protection "1; mode=block"
+</IfModule>

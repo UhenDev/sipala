@@ -1,0 +1,26 @@
+# Konfigurasi Basis Data Sensitif
+# (Gunakan config/database.example.php sebagai template konfigurasi lokal)
+# config/database.php
+
+# Direktori Unggahan Pengguna (Kecualikan berkas gambar pribadi)
+assets/uploads/peralatan/*
+!assets/uploads/peralatan/.gitkeep
+!assets/uploads/peralatan/.htaccess
+assets/uploads/profile/*
+!assets/uploads/profile/.gitkeep
+!assets/uploads/profile/.htaccess
+
+# Berkas Cadangan & Ekstensi Sementara
+*.bak
+*.old
+*.tmp
+*.log
+.env
+.env.*
+
+# Direktori & Berkas Editor / Sistem Operasi
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
