@@ -19,6 +19,7 @@
  */
 
 require_once __DIR__ . '/../includes/admin.php';
+require_once __DIR__ . '/../../includes/qrcode.php';
 
 // Menangani permintaan penghapusan master alat jika dikirim via POST
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_id'])) {
@@ -146,6 +147,7 @@ page_start('Peralatan', 'Kelola data alat laboratorium', 'peralatan');
         <p>Kelola inventaris master, foto alat, stok fisik, kondisi, dan status ketersediaan.</p>
     </div>
     <div class="actions">
+        <a class="btn" href="cetak_label.php" target="_blank" style="background:#f8fafc;color:#0f172a;border:1px solid #cbd5e1;font-weight:600;">🖨️ Cetak Label QR Master</a>
         <a class="btn" href="../unit/index.php">&#x25a6; Kelola Unit Fisik</a>
         <a class="btn btn-primary" href="tambah.php">+ Tambah Master Peralatan</a>
     </div>
@@ -250,6 +252,14 @@ page_start('Peralatan', 'Kelola data alat laboratorium', 'peralatan');
                             <td><?= e((string)($r['lokasi'] ?? '-')) ?></td>
                             <td style="text-align:right;">
                                 <div class="actions" style="justify-content:flex-end;">
+                                    <button type="button" class="btn btn-sm" data-qr-target
+                                            data-qr-title="<?= e($r['nama_barang']) ?>"
+                                            data-qr-code="<?= e($r['kode_barang']) ?>"
+                                            data-qr-scan="<?= e(get_alat_scan_url($r['kode_barang'])) ?>"
+                                            data-qr-print="cetak_label.php?id=<?= $r['id'] ?>"
+                                            data-qr-desc="Kategori: <?= e($r['nama_kategori'] ?? 'Umum') ?> &bull; Lokasi: <?= e($r['lokasi'] ?: '-') ?>"
+                                            style="background:#f8fafc;border:1px solid #cbd5e1;color:#0f172a;font-size:11px;font-weight:600;"
+                                            title="Lihat & Unduh Kode QR Master Alat">📱 QR</button>
                                     <a class="btn btn-sm" href="../unit/index.php?peralatan_id=<?= $r['id'] ?>" style="background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;font-size:11px;">Unit (<?= $r['jumlah'] ?>)</a>
                                     <a class="btn btn-sm btn-edit" href="edit.php?id=<?= $r['id'] ?>">Edit</a>
                                     <button type="button" class="btn btn-sm btn-danger" onclick="confirmDelete('hapus.php?id=<?= $r['id'] ?>', 'Peralatan <?= e(addslashes($r['nama_barang'])) ?>')">Hapus</button>

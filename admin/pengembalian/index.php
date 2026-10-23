@@ -16,6 +16,8 @@
  */
 
 require_once __DIR__ . '/../includes/admin.php';
+require_once __DIR__ . '/../../includes/qrcode.php';
+require_once __DIR__ . '/../../includes/whatsapp.php';
 
 // Mengambil konfigurasi tarif denda harian dari tabel pengaturan sistem
 $tarifDendaHarian = (int)($pdo->query("SELECT nilai FROM pengaturan WHERE nama = 'tarif_denda_harian'")->fetchColumn() ?: 1000);
@@ -70,6 +72,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id'])) {
     $id = (int)$_POST['id'];
     $kondisi = (string)($_POST['kondisi_barang'] ?? 'Baik');
     $catatan = trim((string)($_POST['catatan'] ?? ''));
+    $scannedUnitId = !empty($_POST['unit_id']) ? (int)$_POST['unit_id'] : 0;
+    $scannedBarcode = trim((string)($_POST['barcode'] ?? ''));
 
     try {
         $pdo->beginTransaction();
@@ -83,7 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id'])) {
         }
 
         if (!in_array($p['status'], ['DIPINJAM', 'MENUNGGU_PENGEMBALIAN'], true)) {
-            throw new RuntimeException('Peminjaman ini tidak dalam status aktif dipinjam.');
+            throw new RuntimeException('Peminjaman ini sudah selesai atau tidak dalam status aktif dipinjam.');
         }
 
         $kodePinjam = (string)$p['kode_peminjaman'];
@@ -111,9 +115,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id'])) {
         }
 
         // Kembalikan unit peralatan fisik dan sinkronkan master peralatan
-        $q = $pdo->prepare('SELECT peralatan_id, unit_peralatan_id, jumlah FROM detail_peminjaman WHERE peminjaman_id = ?');
+        $q = $pdo->prepare('SELECT peralatan_id, unit_peralatan_id, barcode_snapshot, jumlah FROM detail_peminjaman WHERE peminjaman_id = ?');
         $q->execute([$id]);
         $items = $q->fetchAll();
+
+        $unitStatus = ($kondisi === 'Rusak Berat') ? 'RUSAK' : 'TERSEDIA';
 
         foreach ($items as $it) {
             $alatId = (int)$it['peralatan_id'];
@@ -121,9 +127,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id'])) {
 
             if ($unitId !== null) {
                 // Perbarui status dan kondisi unit fisik spesifik
-                $unitStatus = ($kondisi === 'Rusak Berat') ? 'RUSAK' : 'TERSEDIA';
                 $updUnit = $pdo->prepare("UPDATE unit_peralatan SET kondisi = ?, status = ?, catatan = CONCAT(COALESCE(catatan, ''), ' | Dikembalikan: ', ?) WHERE id = ?");
                 $updUnit->execute([$kondisi, $unitStatus, date('Y-m-d') . ' (' . $kondisi . ')', $unitId]);
+            } elseif ($scannedUnitId > 0) {
+                // Jika unit fisik spesifik teridentifikasi via barcode scanner
+                $updUnit = $pdo->prepare("UPDATE unit_peralatan SET kondisi = ?, status = ?, catatan = CONCAT(COALESCE(catatan, ''), ' | Dikembalikan: ', ?) WHERE id = ?");
+                $updUnit->execute([$kondisi, $unitStatus, date('Y-m-d') . ' (' . $kondisi . ')', $scannedUnitId]);
             } else {
                 // Jika unit fisik belum terikat spesifik (transaksi lama), perbarui unit berstatus DIPINJAM untuk alat ini
                 $updOldUnit = $pdo->prepare("
@@ -132,7 +141,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id'])) {
                     WHERE peralatan_id = ? AND status = 'DIPINJAM' 
                     LIMIT 1
                 ");
-                $unitStatus = ($kondisi === 'Rusak Berat') ? 'RUSAK' : 'TERSEDIA';
                 $updOldUnit->execute([$kondisi, $unitStatus, $alatId]);
             }
 
@@ -167,10 +175,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id'])) {
 
         $pdo->commit();
 
-        audit_log('RETURN', 'PENGEMBALIAN', $id, "Memproses pengembalian $kodePinjam (Kondisi: $kondisi, Terlambat: $terlambatHari hari, Denda: " . format_rupiah($denda) . ")");
+        $extraLog = $scannedBarcode !== '' ? " [Barcode: $scannedBarcode]" : "";
+        audit_log('RETURN', 'PENGEMBALIAN', $id, "Memproses pengembalian $kodePinjam$extraLog (Kondisi: $kondisi, Terlambat: $terlambatHari hari, Denda: " . format_rupiah($denda) . ")");
         send_notification($peminjamUserId, 'Pengembalian Selesai Diverifikasi', "Pengembalian alat untuk $kodePinjam telah diverifikasi petugas lab (Kondisi: $kondisi" . ($denda > 0 ? ", Denda: " . format_rupiah($denda) : "") . "). Terima kasih telah menjaga inventaris lab!", 'success', 'index.php');
 
-        flash('success', 'Pengembalian alat berhasil diproses. Stok dan status unit fisik telah disinkronkan!');
+        // Kirim Bukti Pengembalian Digital via Bot WhatsApp
+        try {
+            $stInfo = $pdo->prepare("
+                SELECT u.nama, u.no_hp,
+                       GROUP_CONCAT(CONCAT(pr.nama_barang, ' (', COALESCE(up.barcode, up.kode_unit, '-'), ')') SEPARATOR ', ') AS rincian_barang
+                FROM peminjaman p
+                JOIN users u ON u.id = p.user_id
+                JOIN detail_peminjaman dp ON dp.peminjaman_id = p.id
+                JOIN peralatan pr ON pr.id = dp.peralatan_id
+                LEFT JOIN unit_peralatan up ON up.id = dp.unit_peralatan_id
+                WHERE p.id = ? GROUP BY p.id
+            ");
+            $stInfo->execute([$id]);
+            $info = $stInfo->fetch();
+            if ($info && !empty($info['no_hp'])) {
+                send_wa_notification('pengembalian', [
+                    'nama' => $info['nama'],
+                    'no_hp' => $info['no_hp'],
+                    'kode_peminjaman' => $kodePinjam,
+                    'alat' => $info['rincian_barang'],
+                    'kondisi' => $kondisi,
+                    'hari_terlambat' => $terlambatHari,
+                    'denda' => $denda,
+                    'status_denda' => $statusDenda,
+                    'catatan' => $catatan !== '' ? $catatan : 'Diterima dalam kondisi baik',
+                    'peminjaman_id' => $id
+                ]);
+            }
+        } catch (Throwable $eWa) {
+            error_log('Gagal kirim WA pengembalian: ' . $eWa->getMessage());
+        }
+
+        flash('success', 'Pengembalian alat untuk ' . $kodePinjam . ($scannedBarcode !== '' ? " ($scannedBarcode)" : '') . ' berhasil diverifikasi! Stok dan status unit fisik telah disinkronkan.');
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
@@ -183,11 +224,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id'])) {
 // 1. Ambil data peminjaman yang masih aktif (Perlu Dikembalikan)
 $sqlAktif = '
     SELECT p.id, p.kode_peminjaman, p.tanggal_pinjam, p.tanggal_rencana_kembali, p.status, p.rfid_uid,
-           u.nama AS nama_peminjam, u.nis, u.kelas, u.rfid_uid AS user_rfid,
-           COALESCE(SUM(d.jumlah), 0) AS total_item 
+           u.nama AS nama_peminjam, u.nis, u.kelas, u.rfid_uid AS user_rfid, u.no_hp,
+           COALESCE(SUM(d.jumlah), 0) AS total_item,
+           GROUP_CONCAT(DISTINCT CONCAT(pe.nama_barang, " (", COALESCE(up.barcode, up.kode_unit, "-"), ")") SEPARATOR ", ") AS rincian_unit,
+           MIN(up.id) AS single_unit_id,
+           MIN(COALESCE(up.barcode, up.kode_unit)) AS single_unit_barcode,
+           MIN(pe.nama_barang) AS single_tool_name
     FROM peminjaman p 
     LEFT JOIN users u ON u.id = p.user_id 
     LEFT JOIN detail_peminjaman d ON d.peminjaman_id = p.id 
+    LEFT JOIN unit_peralatan up ON up.id = d.unit_peralatan_id
+    LEFT JOIN peralatan pe ON pe.id = d.peralatan_id
     WHERE p.status IN ("DIPINJAM", "MENUNGGU_PENGEMBALIAN") 
 ';
 $paramsAktif = [];
@@ -200,18 +247,18 @@ if ($rfidSearch !== '') {
         OR p.kode_peminjaman LIKE ?
         OR EXISTS (
             SELECT 1 FROM detail_peminjaman dp 
-            LEFT JOIN unit_peralatan up ON up.id = dp.unit_peralatan_id 
-            LEFT JOIN peralatan pe ON pe.id = dp.peralatan_id 
+            LEFT JOIN unit_peralatan up2 ON up2.id = dp.unit_peralatan_id 
+            LEFT JOIN peralatan pe2 ON pe2.id = dp.peralatan_id 
             WHERE dp.peminjaman_id = p.id 
-            AND (up.kode_unit = ? OR up.rfid_uid = ? OR up.serial_number = ? OR pe.nama_barang LIKE ?)
+            AND (up2.kode_unit = ? OR up2.barcode = ? OR dp.barcode_snapshot = ? OR up2.rfid_uid = ? OR up2.serial_number = ? OR pe2.nama_barang LIKE ?)
         )
     ) ';
     $paramsAktif = [
         $rfidSearch, $rfidSearch, $rfidSearch, '%' . $rfidSearch . '%', '%' . $rfidSearch . '%',
-        $rfidSearch, $rfidSearch, $rfidSearch, '%' . $rfidSearch . '%'
+        $rfidSearch, $rfidSearch, $rfidSearch, $rfidSearch, $rfidSearch, '%' . $rfidSearch . '%'
     ];
 }
-$sqlAktif .= 'GROUP BY p.id, p.kode_peminjaman, p.tanggal_pinjam, p.tanggal_rencana_kembali, p.status, p.rfid_uid, u.nama, u.nis, u.kelas, u.rfid_uid ORDER BY p.id DESC';
+$sqlAktif .= 'GROUP BY p.id, p.kode_peminjaman, p.tanggal_pinjam, p.tanggal_rencana_kembali, p.status, p.rfid_uid, u.nama, u.nis, u.kelas, u.rfid_uid, u.no_hp ORDER BY p.id DESC';
 $stmtAktif = $pdo->prepare($sqlAktif);
 $stmtAktif->execute($paramsAktif);
 $rowsAktif = $stmtAktif->fetchAll();
@@ -222,11 +269,14 @@ $sqlSelesai = '
            u.nama AS nama_peminjam, u.nis, u.kelas,
            pg.id AS pengembalian_id, pg.status_denda,
            pg.tanggal_pengembalian, pg.terlambat_hari, pg.denda, pg.kondisi_barang, pg.catatan,
-           COALESCE(SUM(d.jumlah), 0) AS total_item 
+           COALESCE(SUM(d.jumlah), 0) AS total_item,
+           GROUP_CONCAT(DISTINCT CONCAT(pe.nama_barang, " (", COALESCE(up.barcode, d.barcode_snapshot, up.kode_unit, "-"), ")") SEPARATOR ", ") AS rincian_unit
     FROM peminjaman p 
     LEFT JOIN users u ON u.id = p.user_id 
     LEFT JOIN pengembalian pg ON pg.peminjaman_id = p.id 
     LEFT JOIN detail_peminjaman d ON d.peminjaman_id = p.id 
+    LEFT JOIN unit_peralatan up ON up.id = d.unit_peralatan_id
+    LEFT JOIN peralatan pe ON pe.id = d.peralatan_id
     WHERE p.status = "SELESAI" 
 ';
 $paramsSelesai = [];
@@ -239,15 +289,15 @@ if ($rfidSearch !== '') {
         OR p.kode_peminjaman LIKE ?
         OR EXISTS (
             SELECT 1 FROM detail_peminjaman dp 
-            LEFT JOIN unit_peralatan up ON up.id = dp.unit_peralatan_id 
-            LEFT JOIN peralatan pe ON pe.id = dp.peralatan_id 
+            LEFT JOIN unit_peralatan up2 ON up2.id = dp.unit_peralatan_id 
+            LEFT JOIN peralatan pe2 ON pe2.id = dp.peralatan_id 
             WHERE dp.peminjaman_id = p.id 
-            AND (up.kode_unit = ? OR up.rfid_uid = ? OR up.serial_number = ? OR pe.nama_barang LIKE ?)
+            AND (up2.kode_unit = ? OR up2.barcode = ? OR dp.barcode_snapshot = ? OR up2.rfid_uid = ? OR up2.serial_number = ? OR pe2.nama_barang LIKE ?)
         )
     ) ';
     $paramsSelesai = [
         $rfidSearch, $rfidSearch, $rfidSearch, '%' . $rfidSearch . '%', '%' . $rfidSearch . '%',
-        $rfidSearch, $rfidSearch, $rfidSearch, '%' . $rfidSearch . '%'
+        $rfidSearch, $rfidSearch, $rfidSearch, $rfidSearch, $rfidSearch, '%' . $rfidSearch . '%'
     ];
 }
 $sqlSelesai .= 'GROUP BY p.id, p.kode_peminjaman, p.tanggal_pinjam, p.tanggal_rencana_kembali, p.tanggal_realisasi_kembali, p.status, u.nama, u.nis, u.kelas, pg.id, pg.status_denda, pg.tanggal_pengembalian, pg.terlambat_hari, pg.denda, pg.kondisi_barang, pg.catatan ORDER BY p.id DESC LIMIT 50';
@@ -262,6 +312,70 @@ page_start('Pengembalian Alat Lab', 'Proses pengembalian alat dan pengembalian s
     <div>
         <h2>Data Pengembalian Alat Laboratorium</h2>
         <p>Penerimaan pengembalian alat, verifikasi kondisi fisik, kalkulasi denda, dan sinkronisasi stok lab.</p>
+    </div>
+</div>
+
+<!-- BARCODE SCANNER PENGEMBALIAN ALAT (USB HID) -->
+<div class="panel" style="margin-bottom:20px;border:1px solid #cbd5e1;box-shadow:0 2px 8px rgba(0,0,0,0.04);background:linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);">
+    <div style="padding:18px 22px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:12px;flex-wrap:wrap;">
+            <div style="display:flex;align-items:center;gap:12px;">
+                <div style="width:38px;height:38px;border-radius:8px;background:#e0f2fe;border:1px solid #bae6fd;display:flex;align-items:center;justify-content:center;color:#0284c7;flex-shrink:0;">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 7V5a2 2 0 0 1 2-2h2"></path>
+                        <path d="M17 3h2a2 2 0 0 1 2 2v2"></path>
+                        <path d="M21 17v2a2 2 0 0 1-2 2h-2"></path>
+                        <path d="M3 17v2a2 2 0 0 0 2 2h2"></path>
+                        <line x1="7" y1="12" x2="17" y2="12"></line>
+                    </svg>
+                </div>
+                <div>
+                    <h3 style="margin:0;font-size:15px;font-weight:700;color:#0f172a;display:flex;align-items:center;gap:8px;">
+                        Pemindaian Barcode Unit Fisik untuk Pengembalian Cepat
+                    </h3>
+                    <p style="margin:2px 0 0;font-size:12.5px;color:#64748b;">
+                        Arahkan barcode scanner USB ke stiker barcode alat fisik (cth: <code>SIP-ALT-000001</code>). Sistem otomatis memeriksa peminjaman aktif & kalkulasi denda.
+                    </p>
+                </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span id="barcodeScannerStatusBadge" style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:4px 10px;border-radius:20px;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;">
+                    <span style="width:7px;height:7px;border-radius:50%;background:#10b981;"></span>
+                    Scanner Barcode Siap
+                </span>
+            </div>
+        </div>
+
+        <form id="barcodeReturnForm" onsubmit="event.preventDefault(); processReturnBarcode();" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+            <div style="position:relative;flex:1;min-width:280px;">
+                <div style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#0284c7;pointer-events:none;display:flex;align-items:center;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="4" y1="9" x2="20" y2="9"></line>
+                        <line x1="4" y1="15" x2="20" y2="15"></line>
+                        <line x1="10" y1="3" x2="8" y2="21"></line>
+                        <line x1="16" y1="3" x2="14" y2="21"></line>
+                    </svg>
+                </div>
+                <input type="text" 
+                       id="barcodeReturnInput" 
+                       placeholder="Scan / ketik kode barcode unit fisik (cth: SIP-ALT-000036)..." 
+                       autocomplete="off"
+                       autofocus
+                       style="width:100%;padding:11px 14px 11px 40px;border-radius:8px;border:2px solid #0284c7;font-family:'JetBrains Mono', monospace;font-size:14.5px;font-weight:700;background:#ffffff;color:#0f172a;outline:none;box-shadow:0 0 0 3px rgba(2,132,199,0.12);">
+            </div>
+            <button type="submit" id="btnProcessBarcodeReturn" class="btn btn-primary" style="padding:10px 20px;font-weight:700;gap:8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+                Verifikasi & Terima Unit
+            </button>
+            <button type="button" class="btn" onclick="clearReturnBarcodeScan()" style="padding:10px 14px;color:#64748b;">
+                Reset
+            </button>
+        </form>
+
+        <!-- LIVE FEEDBACK BANNER -->
+        <div id="barcodeReturnFeedback" style="display:none;margin-top:14px;"></div>
     </div>
 </div>
 
@@ -394,7 +508,7 @@ page_start('Pengembalian Alat Lab', 'Proses pengembalian alat dan pengembalian s
                     </tr>
                 <?php else: ?>
                     <?php 
-                    $today = new DateTime();
+                    $today = new DateTime(date('Y-m-d'));
                     foreach ($rowsAktif as $i => $r): 
                         $due = new DateTime($r['tanggal_rencana_kembali']);
                         $isLate = ($today > $due);
@@ -402,7 +516,14 @@ page_start('Pengembalian Alat Lab', 'Proses pengembalian alat dan pengembalian s
                     ?>
                         <tr>
                             <td><?= $i + 1 ?></td>
-                            <td><strong><?= e($r['kode_peminjaman']) ?></strong></td>
+                            <td>
+                                <strong><?= e($r['kode_peminjaman']) ?></strong>
+                                <?php if (!empty($r['rincian_unit'])): ?>
+                                    <div style="font-size:11.5px;color:#047857;margin-top:2px;font-family:monospace;font-weight:600;">
+                                        🏷️ <?= e($r['rincian_unit']) ?>
+                                    </div>
+                                <?php endif; ?>
+                            </td>
                             <td>
                                 <div><strong><?= e($r['nama_peminjam'] ?? '-') ?></strong></div>
                                 <div style="font-size:12px;color:#64748b;">
@@ -429,9 +550,28 @@ page_start('Pengembalian Alat Lab', 'Proses pengembalian alat dan pengembalian s
                                 <?php endif; ?>
                             </td>
                             <td>
-                                <button type="button" class="btn btn-sm btn-ok" onclick="openReturnModal(<?= $r['id'] ?>, '<?= e($r['kode_peminjaman']) ?>', '<?= e($r['nama_peminjam']) ?>', <?= $diffDays ?>)">
-                                    Terima Pengembalian
-                                </button>
+                                <div class="actions" style="gap:5px;">
+                                    <?php 
+                                    $rawHp = (string)($r['no_hp'] ?? '');
+                                    ?>
+                                    <?php if ($rawHp !== ''): ?>
+                                        <button type="button" class="btn btn-sm" data-wa-target
+                                                data-wa-id="<?= $r['id'] ?>"
+                                                data-wa-nama="<?= e($r['nama_peminjam'] ?? '') ?>"
+                                                data-wa-kelas="<?= e($r['kelas'] ?? '') ?>"
+                                                data-wa-phone="<?= e($rawHp) ?>"
+                                                data-wa-kode="<?= e($r['kode_peminjaman']) ?>"
+                                                data-wa-kembali="<?= e(date('d-m-Y', strtotime($r['tanggal_rencana_kembali']))) ?>"
+                                                data-wa-type="<?= ($isLate && $diffDays > 0) ? 'terlambat' : 'pengingat' ?>"
+                                                style="background:#22c55e;color:#ffffff;border:none;display:inline-flex;align-items:center;gap:4px;padding:4px 8px;font-size:11px;font-weight:700;"
+                                                title="Kirim pesan WhatsApp ke <?= e($rawHp) ?>">
+                                            📱 WA
+                                        </button>
+                                    <?php endif; ?>
+                                    <button type="button" class="btn btn-sm btn-ok" onclick="openReturnModal(<?= $r['id'] ?>, '<?= e($r['kode_peminjaman']) ?>', '<?= e($r['nama_peminjam']) ?>', <?= $diffDays ?>, <?= !empty($r['single_unit_id']) ? "{ id: " . (int)$r['single_unit_id'] . ", barcode: '" . e($r['single_unit_barcode']) . "', nama_barang: '" . e($r['single_tool_name']) . "' }" : "null" ?>)">
+                                        Terima Pengembalian
+                                    </button>
+                                </div>
                             </td>
                         </tr>
                     <?php endforeach; ?>
@@ -482,7 +622,14 @@ page_start('Pengembalian Alat Lab', 'Proses pengembalian alat dan pengembalian s
                     ?>
                         <tr>
                             <td><?= $i + 1 ?></td>
-                            <td><strong><?= e($r['kode_peminjaman']) ?></strong></td>
+                            <td>
+                                <strong><?= e($r['kode_peminjaman']) ?></strong>
+                                <?php if (!empty($r['rincian_unit'])): ?>
+                                    <div style="font-size:11px;color:#047857;margin-top:2px;font-family:monospace;">
+                                        🏷️ <?= e($r['rincian_unit']) ?>
+                                    </div>
+                                <?php endif; ?>
+                            </td>
                             <td>
                                 <div><strong><?= e($r['nama_peminjam'] ?? '-') ?></strong></div>
                                 <div style="font-size:12px;color:#64748b;">
@@ -557,7 +704,23 @@ page_start('Pengembalian Alat Lab', 'Proses pengembalian alat dan pengembalian s
         <form method="post">
             <?= csrf_field() ?>
             <input type="hidden" name="id" id="returnId">
+            <input type="hidden" name="unit_id" id="returnUnitId" value="">
+            <input type="hidden" name="barcode" id="returnBarcode" value="">
             <input type="hidden" name="terlambat_hari" id="returnLateDays" value="0">
+
+            <!-- PREVIEW UNIT FISIK YANG DIKEMBALIKAN -->
+            <div id="returnUnitPreviewBox" style="display:none;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px 14px;margin-bottom:14px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                    <span style="font-size:11.5px;font-weight:700;color:#166534;background:#dcfce7;border:1px solid #86efac;padding:2px 8px;border-radius:12px;display:inline-flex;align-items:center;gap:4px;">
+                        ✓ Unit Fisik Terverifikasi Barcode
+                    </span>
+                    <span id="returnUnitBarcodeBadge" style="font-family:'JetBrains Mono', monospace;font-weight:700;color:#047857;background:#ffffff;border:1px solid #86efac;padding:2px 8px;border-radius:4px;font-size:12px;"></span>
+                </div>
+                <div style="font-size:14px;font-weight:700;color:#0f172a;" id="returnUnitName">-</div>
+                <div style="font-size:12px;color:#475569;margin-top:2px;">
+                    Kode Unit: <strong id="returnUnitKode">-</strong> &bull; Kondisi Awal: <span id="returnUnitKondisiAwal" class="badge aktif" style="font-size:10.5px;">Baik</span>
+                </div>
+            </div>
 
             <div class="field" style="margin-bottom:14px;">
                 <label>Kondisi Alat Saat Dikembalikan *</label>
@@ -603,37 +766,6 @@ page_start('Pengembalian Alat Lab', 'Proses pengembalian alat dan pengembalian s
     </div>
 </div>
 
-<script>
-const tarifDendaHarian = <?= $tarifDendaHarian ?>;
-
-function openReturnModal(id, kode, nama, lateDays) {
-    document.getElementById('returnId').value = id;
-    document.getElementById('returnLateDays').value = lateDays;
-    
-    let info = 'Terima alat untuk ' + kode + ' (Peminjam: ' + nama + ').';
-    const notice = document.getElementById('dendaNotice');
-    const noticeText = document.getElementById('dendaNoticeText');
-
-    if (lateDays > 0) {
-        const totalDenda = lateDays * tarifDendaHarian;
-        info += ' Perhatian: Siswa terlambat ' + lateDays + ' hari.';
-        document.getElementById('returnDenda').value = totalDenda;
-        if (notice && noticeText) {
-            noticeText.innerHTML = '<strong>Kalkulasi Otomatis:</strong> Terlambat ' + lateDays + ' hari &times; Rp ' + tarifDendaHarian.toLocaleString('id-ID') + ' = <strong>Rp ' + totalDenda.toLocaleString('id-ID') + '</strong>';
-            notice.style.display = 'block';
-        }
-    } else {
-        document.getElementById('returnDenda').value = 0;
-        if (notice && noticeText) {
-            noticeText.innerHTML = '<strong>Tepat Waktu:</strong> Tidak dikenakan denda keterlambatan.';
-            notice.style.display = 'block';
-        }
-    }
-    
-    document.getElementById('returnText').textContent = info;
-    document.getElementById('returnModal').classList.add('show');
-}
-
 <!-- MODAL PELUNASAN DENDA -->
 <div class="modal" id="payFineModal">
     <div class="modal-box">
@@ -663,13 +795,216 @@ function openReturnModal(id, kode, nama, lateDays) {
 </div>
 
 <script>
+const tarifDendaHarian = <?= $tarifDendaHarian ?>;
+let returnScanTimer = null;
+const barcodeInput = document.getElementById('barcodeReturnInput');
+const feedbackContainer = document.getElementById('barcodeReturnFeedback');
+
+function playBarcodeBeep(isSuccess) {
+    try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (isSuccess) {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(1200, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.12);
+            osc.start(audioCtx.currentTime);
+            osc.stop(audioCtx.currentTime + 0.12);
+        } else {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
+            osc.start(audioCtx.currentTime);
+            osc.stop(audioCtx.currentTime + 0.25);
+        }
+    } catch (e) {}
+}
+
+function clearReturnBarcodeScan() {
+    if (barcodeInput) {
+        barcodeInput.value = '';
+        barcodeInput.focus();
+    }
+    if (feedbackContainer) {
+        feedbackContainer.style.display = 'none';
+        feedbackContainer.innerHTML = '';
+    }
+}
+
+async function processReturnBarcode() {
+    if (!barcodeInput) return;
+    const barcode = barcodeInput.value.trim();
+    if (!barcode) {
+        barcodeInput.focus();
+        return;
+    }
+
+    feedbackContainer.style.display = 'block';
+    feedbackContainer.innerHTML = `
+        <div style="background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;padding:10px 14px;border-radius:6px;font-size:13px;display:flex;align-items:center;gap:8px;">
+            <span style="display:inline-block;animation:spin 1s linear infinite;">⏳</span>
+            <span>Memeriksa unit barcode <strong>${escapeHtml(barcode)}</strong> di server...</span>
+        </div>
+    `;
+
+    try {
+        const res = await fetch(`../api_barcode_lookup.php?action=verify_return_unit&barcode=${encodeURIComponent(barcode)}`);
+        const data = await res.json();
+
+        if (!data.success) {
+            playBarcodeBeep(false);
+            feedbackContainer.innerHTML = `
+                <div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:12px 14px;border-radius:8px;font-size:13px;display:flex;align-items:flex-start;gap:10px;">
+                    <div style="font-size:18px;line-height:1;">⚠️</div>
+                    <div style="flex:1;">
+                        <strong style="display:block;margin-bottom:2px;">Pengembalian Tidak Dapat Diproses:</strong>
+                        <span>${escapeHtml(data.message)}</span>
+                    </div>
+                </div>
+            `;
+            barcodeInput.select();
+            return;
+        }
+
+        // Sukses verifikasi barcode
+        playBarcodeBeep(true);
+        const u = data.unit;
+        const l = data.loan;
+
+        feedbackContainer.innerHTML = `
+            <div style="background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;padding:14px 16px;border-radius:8px;font-size:13px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:6px;">
+                    <span style="font-weight:700;color:#047857;display:flex;align-items:center;gap:6px;">
+                        <span style="width:8px;height:8px;border-radius:50%;background:#10b981;"></span>
+                        Barcode Terverifikasi: Transaksi Peminjaman Aktif Ditemukan
+                    </span>
+                    <span style="font-family:'JetBrains Mono', monospace;font-weight:700;background:#ffffff;border:1px solid #a7f3d0;padding:2px 8px;border-radius:4px;color:#047857;">
+                        ${escapeHtml(u.barcode)}
+                    </span>
+                </div>
+                <div style="color:#0f172a;font-size:14px;font-weight:700;margin-bottom:4px;">
+                    ${escapeHtml(u.nama_barang)}
+                </div>
+                <div style="color:#334155;font-size:12.5px;line-height:1.5;">
+                    Peminjam: <strong>${escapeHtml(l.peminjam_nama)}</strong> (NIS: ${escapeHtml(l.peminjam_nis)} | Kelas: ${escapeHtml(l.peminjam_kelas)})<br>
+                    Transaksi: <strong>${escapeHtml(l.kode_peminjaman)}</strong> &bull; Batas Kembali: <strong>${escapeHtml(l.tanggal_rencana_kembali)}</strong> &bull;
+                    Status: <strong style="color:${l.terlambat_hari > 0 ? '#dc2626' : '#15803d'};">${l.terlambat_hari > 0 ? 'Terlambat ' + l.terlambat_hari + ' Hari (' + l.denda_formatted + ')' : 'Tepat Waktu'}</strong>
+                </div>
+            </div>
+        `;
+
+        // Buka returnModal otomatis
+        openReturnModal(l.peminjaman_id, l.kode_peminjaman, l.peminjam_nama, l.terlambat_hari, {
+            id: u.id,
+            barcode: u.barcode,
+            kode_unit: u.kode_unit,
+            nama_barang: u.nama_barang,
+            kondisi_awal: l.kondisi_awal || u.kondisi
+        });
+
+    } catch (err) {
+        playBarcodeBeep(false);
+        feedbackContainer.innerHTML = `
+            <div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:12px;border-radius:6px;font-size:13px;">
+                Terjadi kesalahan jaringan atau server saat memvalidasi barcode. Silakan ulangi pemindaian.
+            </div>
+        `;
+    }
+}
+
+if (barcodeInput) {
+    barcodeInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            processReturnBarcode();
+        }
+    });
+
+    barcodeInput.addEventListener('input', function() {
+        clearTimeout(returnScanTimer);
+        const val = this.value.trim();
+        if (val.length >= 8 && (val.startsWith('SIP-') || val.includes('-'))) {
+            returnScanTimer = setTimeout(() => {
+                processReturnBarcode();
+            }, 300);
+        }
+    });
+}
+
+function openReturnModal(id, kode, nama, lateDays, unitInfo = null) {
+    document.getElementById('returnId').value = id;
+    document.getElementById('returnLateDays').value = lateDays;
+    
+    const unitBox = document.getElementById('returnUnitPreviewBox');
+    const inputUnitId = document.getElementById('returnUnitId');
+    const inputBarcode = document.getElementById('returnBarcode');
+
+    if (unitInfo) {
+        if (inputUnitId) inputUnitId.value = unitInfo.id || '';
+        if (inputBarcode) inputBarcode.value = unitInfo.barcode || '';
+        if (unitBox) {
+            document.getElementById('returnUnitBarcodeBadge').textContent = unitInfo.barcode || '-';
+            document.getElementById('returnUnitName').textContent = unitInfo.nama_barang || '-';
+            document.getElementById('returnUnitKode').textContent = unitInfo.kode_unit || unitInfo.barcode || '-';
+            const badgeKondisi = document.getElementById('returnUnitKondisiAwal');
+            if (badgeKondisi) badgeKondisi.textContent = unitInfo.kondisi_awal || 'Baik';
+            unitBox.style.display = 'block';
+        }
+    } else {
+        if (inputUnitId) inputUnitId.value = '';
+        if (inputBarcode) inputBarcode.value = '';
+        if (unitBox) unitBox.style.display = 'none';
+    }
+
+    let info = 'Terima alat untuk ' + kode + ' (Peminjam: ' + nama + ').';
+    const notice = document.getElementById('dendaNotice');
+    const noticeText = document.getElementById('dendaNoticeText');
+
+    if (lateDays > 0) {
+        const totalDenda = lateDays * tarifDendaHarian;
+        info += ' Perhatian: Siswa terlambat ' + lateDays + ' hari.';
+        document.getElementById('returnDenda').value = totalDenda;
+        if (notice && noticeText) {
+            noticeText.innerHTML = '<strong>Kalkulasi Otomatis:</strong> Terlambat ' + lateDays + ' hari &times; Rp ' + tarifDendaHarian.toLocaleString('id-ID') + ' = <strong>Rp ' + totalDenda.toLocaleString('id-ID') + '</strong>';
+            notice.style.display = 'block';
+        }
+    } else {
+        document.getElementById('returnDenda').value = 0;
+        if (notice && noticeText) {
+            noticeText.innerHTML = '<strong>Tepat Waktu:</strong> Tidak dikenakan denda keterlambatan.';
+            notice.style.display = 'block';
+        }
+    }
+    
+    document.getElementById('returnText').textContent = info;
+    document.getElementById('returnModal').classList.add('show');
+}
+
 function openPayFineModal(pengembalianId, kode, nama, denda) {
     document.getElementById('payFinePengembalianId').value = pengembalianId;
     document.getElementById('payFineText').textContent = 'Penerimaan pembayaran denda untuk transaksi ' + kode + ' (Peminjam: ' + nama + ').';
     document.getElementById('payFineAmount').textContent = 'Rp ' + Number(denda).toLocaleString('id-ID');
     document.getElementById('payFineModal').classList.add('show');
 }
-</script>
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
 </script>
 
 <?php page_end(); ?>

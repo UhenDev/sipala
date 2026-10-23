@@ -21,6 +21,8 @@ if (!$unit) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     require_csrf();
     $kodeUnit = trim((string)($_POST['kode_unit'] ?? ''));
+    $barcode = trim((string)($_POST['barcode'] ?? ''));
+    $statusLabel = (string)($_POST['status_label'] ?? 'BELUM_DILABELI');
     $serial = trim((string)($_POST['serial_number'] ?? ''));
     $rfid = trim((string)($_POST['rfid_uid'] ?? ''));
     $kondisi = (string)($_POST['kondisi'] ?? 'Baik');
@@ -39,6 +41,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new RuntimeException("Kode unit '$kodeUnit' sudah digunakan oleh unit lain.");
             }
 
+            // Jika barcode kosong, defaultkan ke format standar SIP-ALT-XXXXXX
+            if ($barcode === '') {
+                $barcode = sprintf("SIP-ALT-%06d", $unitId);
+            }
+
+            // Cek keunikan barcode selain unit ini
+            $chkB = $pdo->prepare("SELECT id FROM unit_peralatan WHERE barcode = ? AND id != ?");
+            $chkB->execute([$barcode, $unitId]);
+            if ($chkB->fetch()) {
+                throw new RuntimeException("Kode barcode '$barcode' sudah digunakan oleh unit lain.");
+            }
+
             // Cek keunikan RFID jika diisi
             if ($rfid !== '') {
                 $chkR = $pdo->prepare("SELECT id FROM unit_peralatan WHERE rfid_uid = ? AND id != ?");
@@ -48,18 +62,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
 
-            // Jika status saat ini DIPINJAM dan diubah ke selain DIPINJAM secara manual, berikan proteksi
-            if ($unit['status'] === 'DIPINJAM' && $status !== 'DIPINJAM') {
-                // Biarkan hanya jika dikonfirmasi secara sadar
-            }
-
             $upd = $pdo->prepare("
                 UPDATE unit_peralatan 
-                SET kode_unit = ?, serial_number = ?, rfid_uid = ?, kondisi = ?, lokasi = ?, status = ?, catatan = ?
+                SET kode_unit = ?, barcode = ?, status_label = ?, serial_number = ?, rfid_uid = ?, kondisi = ?, lokasi = ?, status = ?, catatan = ?
                 WHERE id = ?
             ");
             $upd->execute([
                 $kodeUnit,
+                $barcode,
+                $statusLabel,
                 $serial !== '' ? $serial : null,
                 $rfid !== '' ? $rfid : null,
                 $kondisi,
@@ -109,6 +120,21 @@ page_start('Edit Unit Peralatan', 'Perbarui data unit fisik inventaris', 'unit')
             <div class="field">
                 <label>Kode Inventaris Unit (Unik) *</label>
                 <input type="text" name="kode_unit" required value="<?= e($unit['kode_unit']) ?>">
+            </div>
+
+            <div class="field">
+                <label>Kode Barcode Fisik (Unik) *</label>
+                <input type="text" name="barcode" required value="<?= e($unit['barcode'] ?: sprintf('SIP-ALT-%06d', $unitId)) ?>" style="font-family:monospace;font-weight:700;">
+                <small style="color:#64748b;font-size:11px;">Format standar: SIP-ALT-XXXXXX (Tercetak pada label stiker)</small>
+            </div>
+
+            <div class="field">
+                <label>Status Pelabelan Fisik *</label>
+                <select name="status_label" required>
+                    <option value="BELUM_DILABELI" <?= ($unit['status_label'] ?? '') === 'BELUM_DILABELI' ? 'selected' : '' ?>>⚠️ Belum Dilabeli</option>
+                    <option value="SUDAH_DILABELI" <?= ($unit['status_label'] ?? '') === 'SUDAH_DILABELI' ? 'selected' : '' ?>>🖨 Sudah Dicetak</option>
+                    <option value="TERVERIFIKASI" <?= ($unit['status_label'] ?? '') === 'TERVERIFIKASI' ? 'selected' : '' ?>>✓ Terverifikasi Fisik</option>
+                </select>
             </div>
 
             <div class="field">

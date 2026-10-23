@@ -15,6 +15,14 @@
 
 declare(strict_types=1);
 
+// Menjamin $_SERVER['REQUEST_METHOD'] terdefinisi dengan aman di lingkungan CLI / Web
+if (!isset($_SERVER['REQUEST_METHOD'])) {
+    $_SERVER['REQUEST_METHOD'] = 'GET';
+}
+
+// Set zona waktu standar Indonesia Barat (WIB)
+date_default_timezone_set('Asia/Jakarta');
+
 const DB_HOST = '127.0.0.1';
 const DB_NAME = 'sipala';
 const DB_USER = 'root';
@@ -41,6 +49,7 @@ function db(): PDO
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES => false,
         ]);
+        $pdo->exec("SET time_zone = '+07:00'");
     } catch (PDOException $exception) {
         error_log(
             'SIPALA database connection error: ' .

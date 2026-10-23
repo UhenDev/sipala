@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/admin.php';
+require_admin();
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     flash('error', 'Metode permintaan tidak diizinkan. Penghapusan pengguna harus menggunakan POST.');

@@ -20,6 +20,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash('error', 'Silakan pilih master peralatan yang valid.');
     } elseif ($mode === 'single') {
         $kodeUnit = trim((string)($_POST['kode_unit'] ?? ''));
+        $barcode = trim((string)($_POST['barcode'] ?? ''));
         $serial = trim((string)($_POST['serial_number'] ?? ''));
         $rfid = trim((string)($_POST['rfid_uid'] ?? ''));
         $kondisi = (string)($_POST['kondisi'] ?? 'Baik');
@@ -37,6 +38,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($chk->fetch()) {
                     flash('error', "Kode unit '$kodeUnit' sudah digunakan.");
                 } else {
+                    // Cek keunikan barcode jika diisi manual
+                    if ($barcode !== '') {
+                        $chkB = $pdo->prepare("SELECT id FROM unit_peralatan WHERE barcode = ?");
+                        $chkB->execute([$barcode]);
+                        if ($chkB->fetch()) {
+                            throw new RuntimeException("Kode barcode '$barcode' sudah digunakan pada unit lain.");
+                        }
+                    }
+
                     // Cek RFID jika diisi
                     if ($rfid !== '') {
                         $chkR = $pdo->prepare("SELECT id FROM unit_peralatan WHERE rfid_uid = ?");
@@ -47,12 +57,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
 
                     $ins = $pdo->prepare("
-                        INSERT INTO unit_peralatan (peralatan_id, kode_unit, serial_number, rfid_uid, kondisi, lokasi, status, catatan)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO unit_peralatan (peralatan_id, kode_unit, barcode, serial_number, rfid_uid, kondisi, lokasi, status, status_label, catatan)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'BELUM_DILABELI', ?)
                     ");
                     $ins->execute([
                         $peralatanId,
                         $kodeUnit,
+                        $barcode !== '' ? $barcode : null,
                         $serial !== '' ? $serial : null,
                         $rfid !== '' ? $rfid : null,
                         $kondisi,
@@ -61,6 +72,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $catatan !== '' ? $catatan : null
                     ]);
                     $newUnitId = (int)$pdo->lastInsertId();
+
+                    // Jika barcode belum diisi, buatkan otomatis SIP-ALT-XXXXXX
+                    if ($barcode === '') {
+                        $autoBarcode = sprintf("SIP-ALT-%06d", $newUnitId);
+                        $pdo->prepare("UPDATE unit_peralatan SET barcode = ? WHERE id = ?")->execute([$autoBarcode, $newUnitId]);
+                        $barcode = $autoBarcode;
+                    }
 
                     // Jika ada RFID, catat juga di rfid_cards
                     if ($rfid !== '') {
@@ -73,9 +91,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
 
                     sync_peralatan_stock($peralatanId);
-                    audit_log('CREATE', 'UNIT_PERALATAN', $newUnitId, "Menambahkan unit $kodeUnit untuk alat {$master['nama_barang']}");
+                    audit_log('CREATE', 'UNIT_PERALATAN', $newUnitId, "Menambahkan unit $kodeUnit (Barcode: $barcode) untuk alat {$master['nama_barang']}");
 
-                    flash('success', "Unit peralatan $kodeUnit berhasil ditambahkan.");
+                    flash('success', "Unit peralatan $kodeUnit berhasil ditambahkan dengan Barcode: $barcode.");
                     redirect('index.php?peralatan_id=' . $peralatanId);
                 }
             } catch (Throwable $e) {
@@ -96,9 +114,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $pdo->beginTransaction();
             $stmtIns = $pdo->prepare("
-                INSERT INTO unit_peralatan (peralatan_id, kode_unit, kondisi, lokasi, status, catatan)
-                VALUES (?, ?, ?, ?, 'TERSEDIA', 'Dibuat secara massal oleh sistem')
+                INSERT INTO unit_peralatan (peralatan_id, kode_unit, barcode, kondisi, lokasi, status, status_label, catatan)
+                VALUES (?, ?, NULL, ?, ?, 'TERSEDIA', 'BELUM_DILABELI', 'Dibuat secara massal oleh sistem')
             ");
+            $stmtUpdBarcode = $pdo->prepare("UPDATE unit_peralatan SET barcode = ? WHERE id = ?");
 
             $createdCount = 0;
             for ($i = 0; $i < $jumlah; $i++) {
@@ -118,6 +137,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $kondisi,
                     $lokasi !== '' ? $lokasi : null
                 ]);
+                $insId = (int)$pdo->lastInsertId();
+                $autoBarcode = sprintf("SIP-ALT-%06d", $insId);
+                $stmtUpdBarcode->execute([$autoBarcode, $insId]);
                 $createdCount++;
             }
 
@@ -125,7 +147,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             sync_peralatan_stock($peralatanId);
             audit_log('CREATE_BATCH', 'UNIT_PERALATAN', $peralatanId, "Membuat $createdCount unit secara massal untuk {$master['nama_barang']}");
 
-            flash('success', "Berhasil menambahkan $createdCount unit fisik untuk {$master['nama_barang']}.");
+            flash('success', "Berhasil menambahkan $createdCount unit fisik ber-barcode untuk {$master['nama_barang']}.");
             redirect('index.php?peralatan_id=' . $peralatanId);
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) {
@@ -181,6 +203,12 @@ page_start('Tambah Unit Peralatan', 'Registrasi unit fisik baru ke inventaris', 
             <div class="field">
                 <label>Kode Inventaris Unit (Unik) *</label>
                 <input type="text" name="kode_unit" id="singleKodeUnit" required placeholder="Contoh: MKS-001" value="<?= e($_POST['kode_unit'] ?? '') ?>">
+            </div>
+
+            <div class="field">
+                <label>Kode Barcode Fisik (Opsional)</label>
+                <input type="text" name="barcode" placeholder="Ketik atau scan stiker (Otomatis dibuat sistem jika kosong)" value="<?= e($_POST['barcode'] ?? '') ?>" style="font-family:monospace;">
+                <small style="color:#64748b;font-size:11px;">Format standar: SIP-ALT-XXXXXX (Dibuat otomatis bila dikosongkan)</small>
             </div>
 
             <div class="field">

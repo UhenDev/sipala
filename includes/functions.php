@@ -17,6 +17,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/barcode.php';
 
 if (!function_exists('e')) {
     /**
@@ -46,10 +47,10 @@ function audit_log(string $aksi, string $modul, ?int $refId, string $deskripsi, 
 
         $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
         $stmt = $pdo->prepare("
-            INSERT INTO log_aktivitas (user_id, aksi, modul, reference_id, deskripsi, ip_address, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, NOW())
+            INSERT INTO log_aktivitas (user_id, aksi, modul, reference_id, aktivitas, deskripsi, ip_address, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
         ");
-        $stmt->execute([$userId, strtoupper($aksi), strtoupper($modul), $refId, $deskripsi, $ip]);
+        $stmt->execute([$userId, strtoupper($aksi), strtoupper($modul), $refId, strtoupper($aksi), $deskripsi, $ip]);
     } catch (Throwable $e) {
         // Jangan biarkan kegagalan logging menggagalkan transaksi utama
         error_log('Audit log error: ' . $e->getMessage());
@@ -119,11 +120,9 @@ function sync_peralatan_stock(int $peralatanId): array
     $total = (int)($stats['total_unit'] ?? 0);
     $tersedia = (int)($stats['tersedia'] ?? 0);
 
-    // Update data di tabel master peralatan jika terdapat unit fisik
-    if ($total > 0) {
-        $upd = $pdo->prepare("UPDATE peralatan SET jumlah = ?, jumlah_tersedia = ? WHERE id = ?");
-        $upd->execute([$total, $tersedia, $peralatanId]);
-    }
+    // Update data di tabel master peralatan sesuai data unit fisik aktual
+    $upd = $pdo->prepare("UPDATE peralatan SET jumlah = ?, jumlah_tersedia = ? WHERE id = ?");
+    $upd->execute([$total, $tersedia, $peralatanId]);
 
     return [
         'total' => $total,
@@ -337,4 +336,82 @@ function secure_save_base64_image(string $base64Data, string $subDir, string $pr
     }
 
     return 'assets/uploads/' . trim($subDir, '/') . '/' . $safeName;
+}
+
+
+/**
+ * Menentukan prefix kode barang berdasarkan nama kategori peralatan
+ */
+function get_prefix_from_kategori(string $kategori): string
+{
+    $kat = strtolower(trim($kategori));
+    if ($kat === '') return 'ALT';
+    if (str_contains($kat, 'iot') || str_contains($kat, 'sensor') || str_contains($kat, 'arduino') || str_contains($kat, 'embedded') || str_contains($kat, 'esp')) {
+        return 'IOT';
+    }
+    if (str_contains($kat, 'jaringan') || str_contains($kat, 'network') || str_contains($kat, 'router') || str_contains($kat, 'cisco') || str_contains($kat, 'switch') || str_contains($kat, 'lan')) {
+        return 'NET';
+    }
+    if (str_contains($kat, 'hardware') || str_contains($kat, 'servis') || str_contains($kat, 'pc') || str_contains($kat, 'komputer') || str_contains($kat, 'obeng') || str_contains($kat, 'solder')) {
+        return 'HW';
+    }
+    if (str_contains($kat, 'multimedia') || str_contains($kat, 'desain') || str_contains($kat, 'kamera') || str_contains($kat, 'audio') || str_contains($kat, 'video') || str_contains($kat, 'tablet')) {
+        return 'MM';
+    }
+    if (str_contains($kat, 'peripheral') || str_contains($kat, 'testing') || str_contains($kat, 'scanner') || str_contains($kat, 'rfid') || str_contains($kat, 'reader')) {
+        return 'DEV';
+    }
+    
+    // Ambil 3 huruf pertama dari nama kategori jika memungkinkan
+    $clean = strtoupper(preg_replace('/[^A-Za-z]/', '', $kategori));
+    if (strlen($clean) >= 3) {
+        return substr($clean, 0, 3);
+    }
+    return 'ALT';
+}
+
+/**
+ * Menghasilkan kode barang inventaris unik berikutnya secara otomatis (contoh: ALT-001, IOT-002, NET-003)
+ */
+function get_next_kode_barang(?PDO $pdo = null, string $prefix = 'ALT'): string
+{
+    if ($pdo === null) {
+        $pdo = db();
+    }
+    $cleanPrefix = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $prefix));
+    if ($cleanPrefix === '') {
+        $cleanPrefix = 'ALT';
+    }
+
+    $stmt = $pdo->prepare("
+        SELECT kode_barang 
+        FROM peralatan 
+        WHERE kode_barang LIKE ? 
+        ORDER BY id DESC
+    ");
+    $stmt->execute([$cleanPrefix . '-%']);
+    $existing = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+    $maxNum = 0;
+    foreach ($existing as $c) {
+        if (preg_match('/^' . preg_quote($cleanPrefix, '/') . '-(\d+)$/i', (string)$c, $m)) {
+            $num = (int)$m[1];
+            if ($num > $maxNum) {
+                $maxNum = $num;
+            }
+        }
+    }
+
+    $nextNum = $maxNum + 1;
+    do {
+        $code = sprintf("%s-%03d", $cleanPrefix, $nextNum);
+        $chk = $pdo->prepare("SELECT COUNT(*) FROM peralatan WHERE kode_barang = ?");
+        $chk->execute([$code]);
+        $exists = (int)$chk->fetchColumn() > 0;
+        if ($exists) {
+            $nextNum++;
+        }
+    } while ($exists);
+
+    return $code;
 }

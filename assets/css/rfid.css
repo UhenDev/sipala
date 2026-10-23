@@ -1,52 +1,51 @@
 /*
  * FILE       : assets/css/rfid.css
  * MODUL      : Komponen Antarmuka RFID
- * FUNGSI     : Mengatur tampilan visual badge status RFID, preview kartu identitas siswa, dan indikator scanner
- *
- * MENCAKUP:
- * - Badge status kartu RFID aktif / nonaktif
- * - Kartu identitas siswa (student-card) dengan aksen chip
- * - Panel scanner terpadu
+ * FUNGSI     : Mengatur tampilan visual badge status RFID, info banner reader, dan kartu identitas siswa
  */
+
+/* Banner Callout Scanner RFID (Clean Institutional) */
 .rfid-box {
-    background: linear-gradient(135deg, #1e293b, #0f172a);
-    color: #f8fafc;
-    border-radius: 12px;
-    padding: 20px;
-    border: 1px solid rgba(255,255,255,0.1);
-    box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);
+    background: #ffffff;
+    color: #1e293b;
+    border-radius: 10px;
+    padding: 16px 20px;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
     position: relative;
     overflow: hidden;
 }
 
-.rfid-box::before {
-    content: '';
-    position: absolute;
-    top: -50%;
-    right: -50%;
-    width: 100%;
-    height: 100%;
-    background: radial-gradient(circle, rgba(59,130,246,0.15), transparent 70%);
-    pointer-events: none;
+.rfid-box h3 {
+    margin: 0 0 4px 0;
+    font-size: 15px;
+    font-weight: 700;
+    color: #0f172a !important;
+}
+
+.rfid-box p {
+    margin: 0;
+    font-size: 13px;
+    color: #64748b !important;
+    line-height: 1.5;
+}
+
+.rfid-box p strong {
+    color: #0f172a;
+    font-weight: 600;
 }
 
 .rfid-wave-icon {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 44px;
-    height: 44px;
-    border-radius: 50%;
-    background: rgba(59,130,246,0.2);
-    color: #60a5fa;
-    font-size: 22px;
-    animation: rfid-pulse 2s infinite;
-}
-
-@keyframes rfid-pulse {
-    0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.5); transform: scale(1); }
-    50% { box-shadow: 0 0 0 12px rgba(59, 130, 246, 0); transform: scale(1.05); }
-    100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); transform: scale(1); }
+    width: 38px;
+    height: 38px;
+    border-radius: 8px;
+    background: #dbeafe;
+    color: #1e40af;
+    font-size: 18px;
+    flex-shrink: 0;
 }
 
 .rfid-badge {
@@ -58,11 +57,13 @@
     font-size: 12px;
     font-weight: 600;
 }
+
 .rfid-badge-active {
     background: #dcfce7;
     color: #15803d;
     border: 1px solid #86efac;
 }
+
 .rfid-badge-inactive {
     background: #f1f5f9;
     color: #64748b;
@@ -70,19 +71,20 @@
 }
 
 .student-card {
-    background: linear-gradient(135deg, #1e3a8a, #0284c7);
+    background: linear-gradient(135deg, #1e40af, #2563eb);
     color: white;
-    border-radius: 16px;
-    padding: 24px;
-    max-width: 440px;
-    box-shadow: 0 15px 30px rgba(2,132,199,0.3);
+    border-radius: 12px;
+    padding: 20px;
+    max-width: 420px;
+    box-shadow: 0 10px 20px rgba(30, 64, 175, 0.15);
     position: relative;
 }
+
 .student-card .chip {
-    width: 42px;
-    height: 32px;
+    width: 38px;
+    height: 28px;
     background: linear-gradient(135deg, #fbbf24, #d97706);
-    border-radius: 6px;
-    margin-bottom: 14px;
-    box-shadow: inset 0 0 4px rgba(0,0,0,0.3);
+    border-radius: 4px;
+    margin-bottom: 12px;
+    box-shadow: inset 0 0 3px rgba(0,0,0,0.3);
 }

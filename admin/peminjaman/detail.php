@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../includes/admin.php';
+require_once __DIR__ . '/../../includes/qrcode.php';
 
 $id = (int)($_GET['id'] ?? 0);
 $q = $pdo->prepare('
@@ -18,10 +19,18 @@ if (!$p) {
 }
 
 $q = $pdo->prepare('
-    SELECT d.jumlah, pr.kode_barang, pr.nama_barang, pr.kondisi, pr.lokasi, k.nama_kategori,
-           u.kode_unit, u.serial_number, u.rfid_uid AS unit_rfid
+    SELECT d.jumlah, 
+           COALESCE(pr.kode_barang, d.kode_barang_snapshot, "-") AS kode_barang,
+           COALESCE(pr.nama_barang, d.nama_barang_snapshot, "Alat Terhapus") AS nama_barang,
+           COALESCE(pr.kondisi, d.kondisi_awal, "-") AS kondisi,
+           COALESCE(pr.lokasi, "-") AS lokasi,
+           COALESCE(k.nama_kategori, "-") AS nama_kategori,
+           COALESCE(u.kode_unit, d.kode_unit_snapshot, "-") AS kode_unit,
+           COALESCE(u.barcode, d.barcode_snapshot, "-") AS barcode,
+           COALESCE(u.serial_number, "-") AS serial_number,
+           u.rfid_uid AS unit_rfid
     FROM detail_peminjaman d 
-    JOIN peralatan pr ON pr.id = d.peralatan_id 
+    LEFT JOIN peralatan pr ON pr.id = d.peralatan_id 
     LEFT JOIN kategori k ON k.id = pr.kategori_id
     LEFT JOIN unit_peralatan u ON u.id = d.unit_peralatan_id
     WHERE d.peminjaman_id = ? 
@@ -33,12 +42,104 @@ $items = $q->fetchAll();
 page_start('Detail Peminjaman', 'Rincian transaksi & status validasi RFID', 'peminjaman');
 ?>
 
+<style>
+@media print {
+    .sidebar, .sidebar-overlay, .topbar, .actions, .sidebar-toggle-btn, button {
+        display: none !important;
+    }
+    .main {
+        margin-left: 0 !important;
+        width: 100% !important;
+    }
+    .content {
+        padding: 10mm 15mm !important;
+    }
+    body {
+        background: #ffffff !important;
+        color: #000000 !important;
+        font-size: 11pt !important;
+    }
+    .head {
+        display: none !important;
+    }
+    .print-kop, .print-signatures {
+        display: block !important;
+    }
+    .panel, .form-panel {
+        box-shadow: none !important;
+        border: 1px solid #777 !important;
+        margin-bottom: 14px !important;
+        page-break-inside: avoid;
+    }
+    .grid {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+        gap: 8px !important;
+    }
+    .field input {
+        border: 1px solid #999 !important;
+        background: transparent !important;
+        padding: 4px 6px !important;
+        font-size: 10pt !important;
+    }
+    table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+    }
+    th, td {
+        border: 1px solid #444 !important;
+        padding: 6px 8px !important;
+        font-size: 10pt !important;
+    }
+    th {
+        background: #e5e7eb !important;
+        color: #000 !important;
+    }
+    .badge {
+        border: none !important;
+        padding: 0 !important;
+        background: transparent !important;
+        color: #000 !important;
+        font-weight: 600 !important;
+    }
+}
+</style>
+
+<!-- KOP RESMI CETAK (Hanya Muncul Saat Print) -->
+<div class="print-kop" style="display:none;">
+    <div style="display:flex;align-items:center;gap:16px;border-bottom:3px double #000000;padding-bottom:12px;margin-bottom:14px;">
+        <img src="../../assets/img/logo.jpg" alt="Logo" style="width:60px;height:60px;object-fit:cover;border-radius:4px;">
+        <div style="flex:1;text-align:center;">
+            <h3 style="margin:0;font-size:15px;text-transform:uppercase;letter-spacing:0.5px;color:#000;">SMK NEGERI 1 PANYINGKIRAN</h3>
+            <h2 style="margin:2px 0 0;font-size:17px;font-weight:bold;color:#000;">LABORATORIUM REKAYASA PERANGKAT LUNAK</h2>
+            <p style="margin:2px 0 0;font-size:10.5px;color:#333;">Jl. Kirana, Majalengka &bull; SIPALA - Sistem Informasi Peminjaman Alat</p>
+        </div>
+    </div>
+    <div style="text-align:center;margin-bottom:14px;">
+        <h4 style="margin:0;font-size:14px;text-transform:uppercase;text-decoration:underline;">TANDA TERIMA PEMINJAMAN ALAT LABORATORIUM</h4>
+        <span style="font-size:11.5px;color:#444;">Nomor Dokumen: <?= e($p['kode_peminjaman']) ?></span>
+    </div>
+</div>
+
 <div class="head">
     <div>
         <h2>Detail Peminjaman: <?= e($p['kode_peminjaman']) ?></h2>
         <p>Tanggal Pengajuan: <?= e(date('d-m-Y H:i', strtotime($p['tanggal_pengajuan']))) ?></p>
     </div>
     <div class="actions">
+        <?php if (!empty($p['no_hp'])): ?>
+            <button type="button" class="btn" data-wa-target
+                    data-wa-id="<?= $p['id'] ?>"
+                    data-wa-nama="<?= e($p['nama_peminjam'] ?? '') ?>"
+                    data-wa-kelas="<?= e($p['kelas'] ?? '') ?>"
+                    data-wa-phone="<?= e($p['no_hp']) ?>"
+                    data-wa-kode="<?= e($p['kode_peminjaman']) ?>"
+                    data-wa-kembali="<?= e(date('d-m-Y', strtotime($p['tanggal_rencana_kembali']))) ?>"
+                    data-wa-type="pengingat"
+                    style="background:#22c55e;color:#ffffff;border:none;font-weight:700;">
+                💬 Kirim Pesan WA
+            </button>
+        <?php endif; ?>
         <button class="btn" onclick="window.print()">🖨️ Cetak Tanda Terima</button>
         <a class="btn" href="index.php">Kembali</a>
     </div>
@@ -129,6 +230,19 @@ page_start('Detail Peminjaman', 'Rincian transaksi & status validasi RFID', 'pem
                             <td>
                                 <?php if (!empty($it['kode_unit'])): ?>
                                     <strong style="font-family:monospace;color:#1e40af;"><?= e($it['kode_unit']) ?></strong>
+                                    <?php if (!empty($it['barcode']) && $it['barcode'] !== '-'): ?>
+                                        <div style="font-family:'JetBrains Mono', monospace;font-size:11px;color:#047857;font-weight:700;margin-top:2px;">
+                                            🏷️ <?= e($it['barcode']) ?>
+                                        </div>
+                                    <?php endif; ?>
+                                    <button type="button" class="btn btn-sm" data-qr-target
+                                            data-qr-title="<?= e($it['nama_barang']) ?>"
+                                            data-qr-code="<?= e($it['barcode'] !== '-' ? $it['barcode'] : $it['kode_unit']) ?>"
+                                            data-qr-scan="<?= e(get_unit_scan_url($it['barcode'] !== '-' ? $it['barcode'] : $it['kode_unit'])) ?>"
+                                            data-qr-desc="Peminjaman: <?= e($p['kode_peminjaman']) ?>"
+                                            style="background:#f1f5f9;border:1px solid #cbd5e1;padding:2px 6px;font-size:10px;margin-top:4px;cursor:pointer;">
+                                        📱 QR / Barcode
+                                    </button>
                                     <?php if (!empty($it['unit_rfid'])): ?>
                                         <div style="font-size:10px;color:#64748b;font-family:monospace;">RFID: <?= e($it['unit_rfid']) ?></div>
                                     <?php endif; ?>
@@ -145,6 +259,22 @@ page_start('Detail Peminjaman', 'Rincian transaksi & status validasi RFID', 'pem
                 <?php endif; ?>
             </tbody>
         </table>
+    </div>
+</div>
+
+<!-- TANDA TANGAN RESMI (Hanya Muncul Saat Print) -->
+<div class="print-signatures" style="display:none;margin-top:40px;page-break-inside:avoid;">
+    <div style="display:flex;justify-content:space-between;text-align:center;font-size:11pt;padding:0 20px;">
+        <div style="width:220px;">
+            <p style="margin:0 0 70px 0;">Peminjam / Siswa,</p>
+            <p style="margin:0;font-weight:bold;text-decoration:underline;"><?= e($p['nama_peminjam'] ?? '-') ?></p>
+            <p style="margin:2px 0 0;color:#555;font-size:10pt;">NIS: <?= e($p['nis'] ?: '-') ?> &bull; <?= e($p['kelas'] ?: '-') ?></p>
+        </div>
+        <div style="width:220px;">
+            <p style="margin:0 0 70px 0;">Petugas / Laboran Lab,</p>
+            <p style="margin:0;font-weight:bold;text-decoration:underline;"><?= e($p['nama_petugas'] ?? $_SESSION['nama'] ?? 'Petugas Lab') ?></p>
+            <p style="margin:2px 0 0;color:#555;font-size:10pt;">Lab Komputer RPL</p>
+        </div>
     </div>
 </div>
 

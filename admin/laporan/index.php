@@ -26,8 +26,10 @@ $sql = "
     SELECT p.id, p.kode_peminjaman, p.tanggal_pinjam, p.tanggal_rencana_kembali, p.tanggal_realisasi_kembali,
            p.status, p.keperluan,
            u.nama AS nama_siswa, u.nis, u.kelas,
-           pr.nama_barang, pr.kode_barang,
-           COALESCE(up.kode_unit, '-') AS kode_unit,
+           COALESCE(pr.nama_barang, d.nama_barang_snapshot, 'Alat Terhapus') AS nama_barang,
+           COALESCE(pr.kode_barang, d.kode_barang_snapshot, '-') AS kode_barang,
+           COALESCE(up.kode_unit, d.kode_unit_snapshot, '-') AS kode_unit,
+           COALESCE(up.barcode, d.barcode_snapshot, '-') AS barcode,
            COALESCE(up.serial_number, '-') AS serial_number,
            d.jumlah, d.kondisi_awal, d.kondisi_akhir,
            COALESCE(pg.denda, 0) AS denda,
@@ -36,7 +38,7 @@ $sql = "
     FROM peminjaman p
     JOIN users u ON u.id = p.user_id
     JOIN detail_peminjaman d ON d.peminjaman_id = p.id
-    JOIN peralatan pr ON pr.id = d.peralatan_id
+    LEFT JOIN peralatan pr ON pr.id = d.peralatan_id
     LEFT JOIN unit_peralatan up ON up.id = d.unit_peralatan_id
     LEFT JOIN pengembalian pg ON pg.peminjaman_id = p.id
     WHERE 1=1
@@ -90,6 +92,7 @@ if ($export === 'csv') {
         'Kelas',
         'Nama Peralatan',
         'Kode Unit Fisik',
+        'Barcode Unit',
         'Nomor Seri',
         'Jumlah Unit',
         'Tgl Pinjam',
@@ -119,6 +122,7 @@ if ($export === 'csv') {
             $escCsv($r['kelas'] ?: '-'),
             $escCsv($r['nama_barang']),
             $escCsv($r['kode_unit']),
+            $escCsv($r['barcode']),
             $escCsv($r['serial_number']),
             (int)$r['jumlah'],
             $escCsv($r['tanggal_pinjam']),
@@ -303,6 +307,9 @@ page_start('Laporan Sirkulasi', 'Rekapitulasi sirkulasi inventaris Lab Komputer 
                             </td>
                             <td>
                                 <div><code style="font-size:11.5px;color:#1e40af;"><?= e($r['kode_unit']) ?></code></div>
+                                <?php if (!empty($r['barcode']) && $r['barcode'] !== '-'): ?>
+                                    <div style="font-size:10.5px;color:#047857;font-family:monospace;font-weight:600;"><?= e($r['barcode']) ?></div>
+                                <?php endif; ?>
                                 <div style="font-size:10.5px;color:#64748b;">SN: <?= e($r['serial_number']) ?></div>
                             </td>
                             <td><?= e(date('d/m/Y', strtotime($r['tanggal_pinjam']))) ?></td>

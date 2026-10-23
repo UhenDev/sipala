@@ -1,5 +1,7 @@
 <?php
 require_once __DIR__ . '/../includes/admin.php';
+require_once __DIR__ . '/../../includes/qrcode.php';
+require_once __DIR__ . '/../../includes/whatsapp.php';
 
 // Ambil daftar alat lab yang tersedia
 $items = $pdo->query('
@@ -30,6 +32,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         if ($userId <= 0) {
             throw new RuntimeException('Silakan tap kartu RFID atau pilih peminjam terlebih dahulu.');
+        }
+
+        $stUser = $pdo->prepare('SELECT id, status, nama FROM users WHERE id = ?');
+        $stUser->execute([$userId]);
+        $uInfo = $stUser->fetch();
+        if (!$uInfo || $uInfo['status'] !== 'aktif') {
+            throw new RuntimeException('Akun siswa/peminjam tidak ditemukan atau sedang dinonaktifkan.');
+        }
+
+        if ($tglKembali < $tglPinjam) {
+            throw new RuntimeException('Tanggal rencana pengembalian tidak boleh mendahului tanggal pinjam.');
         }
 
         // Filter item yang jumlahnya > 0
@@ -80,7 +93,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Alokasikan unit fisik spesifik dan perbarui status unit menjadi DIPINJAM
         $stAvail = $pdo->prepare("
-            SELECT id, kode_unit, serial_number 
+            SELECT id, kode_unit, serial_number, barcode 
             FROM unit_peralatan 
             WHERE peralatan_id = ? AND status = 'TERSEDIA' AND kondisi != 'Rusak Berat' 
             ORDER BY id ASC
@@ -88,8 +101,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ");
         $stUpdUnit = $pdo->prepare("UPDATE unit_peralatan SET status = 'DIPINJAM' WHERE id = ?");
         $insertDetail = $pdo->prepare('
-            INSERT INTO detail_peminjaman (peminjaman_id, peralatan_id, unit_peralatan_id, jumlah, kondisi_awal)
-            VALUES (?, ?, ?, 1, "Baik")
+            INSERT INTO detail_peminjaman (peminjaman_id, peralatan_id, unit_peralatan_id, kode_unit_snapshot, barcode_snapshot, jumlah, kondisi_awal)
+            VALUES (?, ?, ?, ?, ?, 1, "Baik")
         ');
 
         foreach ($validItems as $itemId => $qty) {
@@ -108,7 +121,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             foreach ($availUnits as $u) {
                 $stUpdUnit->execute([$u['id']]);
-                $insertDetail->execute([$peminjamanId, $itemId, $u['id']]);
+                $insertDetail->execute([$peminjamanId, $itemId, $u['id'], $u['kode_unit'], $u['barcode']]);
             }
 
             // Sinkronkan stok master peralatan secara otomatis berdasarkan data unit_peralatan
@@ -119,6 +132,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         audit_log('BORROW', 'PEMINJAMAN', $peminjamanId, "Peminjaman manual dibuat untuk $kode (" . ($rfidUid !== '' ? "Verifikasi RFID: $rfidUid" : "Manual") . ")");
         send_notification($userId, 'Peminjaman Alat Laboratorium Baru', "Peminjaman alat ($kode) telah dicatat dan diserahkan oleh petugas lab.", 'info', 'index.php');
+
+        // Kirim Notifikasi WhatsApp Serah Terima ke Siswa
+        try {
+            $stInfo = $pdo->prepare("
+                SELECT u.nama, u.no_hp,
+                       GROUP_CONCAT(CONCAT(pr.nama_barang, ' (', COALESCE(up.kode_unit, '-'), ')') SEPARATOR ', ') AS rincian_barang
+                FROM peminjaman p
+                JOIN users u ON u.id = p.user_id
+                JOIN detail_peminjaman dp ON dp.peminjaman_id = p.id
+                JOIN peralatan pr ON pr.id = dp.peralatan_id
+                LEFT JOIN unit_peralatan up ON up.id = dp.unit_peralatan_id
+                WHERE p.id = ? GROUP BY p.id
+            ");
+            $stInfo->execute([$peminjamanId]);
+            $info = $stInfo->fetch();
+            if ($info && !empty($info['no_hp'])) {
+                send_wa_notification('serah_terima', [
+                    'nama' => $info['nama'],
+                    'no_hp' => $info['no_hp'],
+                    'kode_peminjaman' => $kode,
+                    'alat' => $info['rincian_barang'],
+                    'kode_unit' => $info['rincian_barang'],
+                    'tgl_pinjam' => $tglPinjam,
+                    'tgl_kembali' => $tglKembali,
+                    'peminjaman_id' => $peminjamanId
+                ]);
+            }
+        } catch (Throwable $eWa) {
+            error_log('Gagal kirim WA direct borrow: ' . $eWa->getMessage());
+        }
 
         flash('success', 'Peminjaman ' . $kode . ' berhasil dibuat & unit fisik telah dialokasikan!');
         redirect('detail.php?id=' . $peminjamanId);
@@ -145,41 +188,47 @@ page_start('Peminjaman Baru (RFID)', 'Proses peminjaman alat lab dengan validasi
     <?= csrf_field() ?>
     <!-- TAHAP 1: RFID READER -->
     <div class="rfid-box" style="margin-bottom:24px;">
-        <div style="display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap;">
-            <div class="rfid-wave-icon" style="margin-top:4px;font-size:20px;">📶</div>
+        <div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;">
+            <div class="rfid-wave-icon" style="margin-top:2px;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="5" width="20" height="14" rx="2"></rect>
+                    <line x1="2" y1="10" x2="22" y2="10"></line>
+                </svg>
+            </div>
             <div style="flex:1;min-width:280px;">
-                <h3 style="margin:0 0 6px 0;font-size:17px;color:#ffffff;">Langkah 1: Tap Kartu Siswa ke Reader RFID</h3>
-                <p style="margin:0 0 14px 0;font-size:13px;color:#94a3b8;">
+                <h3>Langkah 1: Tap Kartu Siswa ke Reader RFID</h3>
+                <p style="margin-bottom:12px;">
                     Dekatkan ID Card Siswa ke reader USB. Data siswa peminjam akan otomatis terverifikasi secara instan.
                 </p>
 
                 <div style="display:flex;gap:10px;">
                     <input type="text" id="rfidScanInput" placeholder="Tempelkan kartu siswa di sini..." 
                            class="rfid-autofocus" data-rfid-scanner="true"
-                           style="flex:1;padding:12px 16px;border-radius:8px;border:2px solid #1769AA;background:#ffffff;color:#0f172a;font-size:16px;font-family:inherit;font-weight:600;">
-                    <button type="button" class="btn btn-primary" onclick="lookupRfid()" style="padding:10px 20px;">
+                           autocomplete="off"
+                           style="flex:1;padding:9px 13px;border-radius:6px;border:1px solid #cbd5e1;background:#ffffff;color:#0f172a;font-size:14.5px;font-family:'JetBrains Mono', monospace;font-weight:600;">
+                    <button type="button" class="btn btn-primary" onclick="lookupRfid()" style="padding:8px 16px;">
                         Cek Kartu
                     </button>
                 </div>
             </div>
 
             <!-- HASIL VALIDASI IDENTITAS SISWA -->
-            <div id="studentCardPreview" style="flex:1;min-width:280px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.15);border-radius:12px;padding:16px;">
-                <div id="noStudentState" style="text-align:center;padding:18px 10px;color:#94a3b8;">
-                    <div style="font-size:28px;margin-bottom:6px;">💳</div>
-                    <div>Menunggu pemindaian kartu RFID siswa...</div>
-                    <small style="color:#94a3b8;">Atau pilih manual dari opsi di bawah jika kartu tertinggal.</small>
+            <div id="studentCardPreview" style="flex:1;min-width:280px;background:#ffffff;border:1px solid #bfdbfe;border-radius:10px;padding:14px;box-shadow:0 1px 3px rgba(0,0,0,0.03);">
+                <div id="noStudentState" style="text-align:center;padding:14px 10px;color:#64748b;">
+                    <div style="font-size:22px;margin-bottom:4px;">💳</div>
+                    <div style="font-weight:600;font-size:13px;color:#1e293b;">Menunggu pemindaian kartu RFID siswa...</div>
+                    <small style="color:#64748b;font-size:12px;">Atau pilih manual dari opsi di bawah jika kartu tertinggal.</small>
                 </div>
                 <div id="verifiedStudentState" style="display:none;">
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-                        <span class="rfid-badge rfid-badge-active" style="font-size:12px;">✓ Kartu Terverifikasi Sah</span>
-                        <small id="displayRfid" style="color:#93c5fd;font-family:monospace;"></small>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                        <span class="rfid-badge rfid-badge-active" style="font-size:11.5px;">✓ Kartu Terverifikasi Sah</span>
+                        <small id="displayRfid" style="color:#1e40af;font-family:monospace;font-weight:600;"></small>
                     </div>
-                    <div style="font-size:18px;font-weight:700;color:#ffffff;" id="displayNama">-</div>
-                    <div style="font-size:13px;color:#cbd5e1;margin-top:2px;">
-                        NIS: <strong id="displayNis">-</strong> &bull; Kelas: <strong id="displayKelas">-</strong>
+                    <div style="font-size:16px;font-weight:700;color:#0f172a;" id="displayNama">-</div>
+                    <div style="font-size:13px;color:#475569;margin-top:2px;">
+                        NIS: <strong id="displayNis" style="color:#0f172a;">-</strong> &bull; Kelas: <strong id="displayKelas" style="color:#0f172a;">-</strong>
                     </div>
-                    <div style="margin-top:10px;font-size:12px;color:#86efac;" id="displayStatusPinjam">
+                    <div style="margin-top:8px;font-size:12px;color:#15803d;font-weight:600;" id="displayStatusPinjam">
                         Status: Bebas pinjaman aktif
                     </div>
                 </div>
@@ -203,6 +252,7 @@ page_start('Peminjaman Baru (RFID)', 'Proses peminjaman alat lab dengan validasi
                     <input type="text" id="searchManualStudent" 
                            placeholder="Ketik nama siswa, NIS, atau kelas untuk mencari..." 
                            oninput="filterManualStudents()" 
+                           autocomplete="off"
                            style="width:100%;padding:10px 14px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;outline:none;">
                 </div>
                 <button type="button" class="btn" onclick="resetManualSearch()">Reset</button>
@@ -228,9 +278,18 @@ page_start('Peminjaman Baru (RFID)', 'Proses peminjaman alat lab dengan validasi
 
     <!-- TAHAP 2: PILIH PERALATAN LAB -->
     <div class="panel" style="margin-bottom:24px;">
-        <div class="panel-title">
+        <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
             <span>Langkah 2: Pilih Peralatan Laboratorium yang Dipinjam</span>
             <span style="font-size:12px;color:#64748b;font-weight:normal;">Tentukan jumlah alat yang diambil</span>
+        </div>
+        <div style="padding:10px 20px;background:#f8fafc;border-bottom:1px solid #e2e8f0;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+            <div style="position:relative;flex:1;max-width:380px;">
+                <input type="text" id="searchItemInput" placeholder="Cari nama alat, kode barang, kategori, lokasi..." 
+                       oninput="filterItemTable()" 
+                       autocomplete="off"
+                       style="width:100%;padding:8px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;background:#ffffff;">
+            </div>
+            <span id="searchItemCount" style="font-size:12.5px;color:#64748b;">Menampilkan <?= count($items) ?> peralatan lab</span>
         </div>
         <div class="table-wrap">
             <table>
@@ -245,7 +304,7 @@ page_start('Peminjaman Baru (RFID)', 'Proses peminjaman alat lab dengan validasi
                         <th style="width:140px;">Jumlah Pinjam</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="itemsTableBody">
                     <?php if (empty($items)): ?>
                         <tr>
                             <td colspan="7">
@@ -385,6 +444,26 @@ function toggleItem(id) {
     if (chk && qty) {
         qty.disabled = !chk.checked;
         if (chk.checked) qty.focus();
+    }
+}
+
+function filterItemTable() {
+    const input = document.getElementById('searchItemInput');
+    const query = (input ? input.value : '').toLowerCase().trim();
+    const rows = document.querySelectorAll('#itemsTableBody tr');
+    let visibleCount = 0;
+    rows.forEach(tr => {
+        const text = tr.textContent.toLowerCase();
+        if (query === '' || text.includes(query)) {
+            tr.style.display = '';
+            visibleCount++;
+        } else {
+            tr.style.display = 'none';
+        }
+    });
+    const countElem = document.getElementById('searchItemCount');
+    if (countElem) {
+        countElem.textContent = 'Menampilkan ' + visibleCount + ' peralatan lab';
     }
 }
 

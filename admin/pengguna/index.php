@@ -14,6 +14,7 @@
  */
 
 require_once __DIR__ . '/../includes/admin.php';
+require_admin();
 
 // PROSES PENGHAPUSAN MASSAL (BULK DELETE)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['bulk_action']) && $_POST['bulk_action'] === 'delete') {

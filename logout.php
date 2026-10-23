@@ -16,8 +16,10 @@
 
 declare(strict_types=1);
 
-session_name('sipala_session');
-session_start();
+if (session_status() === PHP_SESSION_NONE) {
+    session_name('sipala_session');
+    session_start();
+}
 
 /*
 |--------------------------------------------------------------------------

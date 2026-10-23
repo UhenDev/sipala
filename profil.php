@@ -19,8 +19,8 @@
 
 declare(strict_types=1);
 
-session_name('sipala_session');
 if (session_status() === PHP_SESSION_NONE) {
+    session_name('sipala_session');
     session_start();
 }
 
@@ -30,8 +30,8 @@ require_once __DIR__ . '/includes/functions.php';
 $pdo = db();
 
 if (!function_exists('e')) {
-    function e(string $v): string {
-        return htmlspecialchars($v, ENT_QUOTES, 'UTF-8');
+    function e(mixed $v): string {
+        return htmlspecialchars((string)($v ?? ''), ENT_QUOTES, 'UTF-8');
     }
 }
 
@@ -57,7 +57,8 @@ $isStudent = ($user['role'] === 'peminjam');
 
 // Ambil riwayat denda siswa jika ada
 $myFines = [];
-$totalDenda = 0.0;
+$totalUnpaidDenda = 0.0;
+$hasUnpaidFine = false;
 if ($isStudent) {
     $stmtFines = $pdo->prepare('
         SELECT pg.*, p.kode_peminjaman, p.tanggal_pinjam, p.tanggal_rencana_kembali
@@ -68,7 +69,9 @@ if ($isStudent) {
     ');
     $stmtFines->execute([$userId]);
     $myFines = $stmtFines->fetchAll();
-    $totalDenda = array_sum(array_map(fn($f) => (float)$f['denda'], $myFines));
+    $unpaidList = array_filter($myFines, fn($f) => ($f['status_denda'] ?? 'LUNAS') === 'BELUM_LUNAS');
+    $totalUnpaidDenda = array_sum(array_map(fn($f) => (float)$f['denda'], $unpaidList));
+    $hasUnpaidFine = ($totalUnpaidDenda > 0);
 }
 
 $flashMsg = $_SESSION['flash_msg'] ?? '';
@@ -200,7 +203,9 @@ $stmtFines = $pdo->prepare('
 ');
 $stmtFines->execute([$userId]);
 $myFines = $stmtFines->fetchAll();
-$totalDenda = array_sum(array_map(fn($f) => (float)$f['denda'], $myFines));
+$unpaidList = array_filter($myFines, fn($f) => ($f['status_denda'] ?? 'LUNAS') === 'BELUM_LUNAS');
+$totalUnpaidDenda = array_sum(array_map(fn($f) => (float)$f['denda'], $unpaidList));
+$hasUnpaidFine = ($totalUnpaidDenda > 0);
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -619,10 +624,10 @@ $totalDenda = array_sum(array_map(fn($f) => (float)$f['denda'], $myFines));
 
         <?php if ($isStudent): ?>
         <!-- PANEL INFORMASI DENDA & TATA TERTIB LAB (KHUSUS SISWA) -->
-        <div class="panel" style="border-left:4px solid <?= $totalDenda > 0 ? '#dc2626' : '#16a34a' ?>;">
-            <div class="panel-header" style="background:<?= $totalDenda > 0 ? '#fef2f2' : '#f0fdf4' ?>;">
+        <div class="panel" style="border-left:4px solid <?= $hasUnpaidFine ? '#dc2626' : '#16a34a' ?>;">
+            <div class="panel-header" style="background:<?= $hasUnpaidFine ? '#fef2f2' : '#f0fdf4' ?>;">
                 <div>
-                    <h2 style="color:<?= $totalDenda > 0 ? '#991b1b' : '#166534' ?>;margin:0;">
+                    <h2 style="color:<?= $hasUnpaidFine ? '#991b1b' : '#166534' ?>;margin:0;">
                         Status Denda & Catatan Laboratorium
                     </h2>
                     <p style="font-size:12px;color:#64748b;margin:2px 0 0 0;">
@@ -630,9 +635,13 @@ $totalDenda = array_sum(array_map(fn($f) => (float)$f['denda'], $myFines));
                     </p>
                 </div>
                 <div>
-                    <?php if ($totalDenda > 0): ?>
-                        <span style="font-size:11px;color:#991b1b;display:block;">Total Denda:</span>
-                        <strong style="font-size:16px;color:#dc2626;">Rp <?= number_format($totalDenda, 0, ',', '.') ?></strong>
+                    <?php if ($hasUnpaidFine): ?>
+                        <span style="font-size:11px;color:#991b1b;display:block;">Tunggakan Belum Lunas:</span>
+                        <strong style="font-size:16px;color:#dc2626;">Rp <?= number_format($totalUnpaidDenda, 0, ',', '.') ?></strong>
+                    <?php elseif (!empty($myFines)): ?>
+                        <span style="background:#dcfce7;color:#15803d;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;border:1px solid #86efac;">
+                            ● Seluruh Denda Lunas
+                        </span>
                     <?php else: ?>
                         <span style="background:#dcfce7;color:#15803d;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;border:1px solid #86efac;">
                             Bebas Denda / Tertib
@@ -641,17 +650,30 @@ $totalDenda = array_sum(array_map(fn($f) => (float)$f['denda'], $myFines));
                 </div>
             </div>
             <div class="panel-body">
-                <?php if ($totalDenda > 0): ?>
+                <?php if ($hasUnpaidFine): ?>
                     <div style="background:#fff5f5;border:1px solid #fecaca;padding:12px 16px;border-radius:6px;margin-bottom:14px;color:#991b1b;font-size:13px;">
-                        <strong>Perhatian:</strong> Akun Anda memiliki catatan denda keterlambatan atau penggantian fisik alat laboratorium. Silakan selesaikan kewajiban di ruang petugas laboratorium.
+                        <strong>Perhatian:</strong> Akun Anda memiliki tagihan denda keterlambatan atau penggantian fisik alat laboratorium yang belum dilunasi. Silakan selesaikan kewajiban di ruang petugas laboratorium.
                     </div>
+                <?php elseif (!empty($myFines)): ?>
+                    <div style="background:#f0fdf4;border:1px solid #bbf7d0;padding:10px 14px;border-radius:6px;margin-bottom:14px;color:#166534;font-size:12.5px;display:flex;align-items:center;gap:8px;">
+                        <span style="font-size:16px;">✔</span>
+                        <span>Seluruh catatan denda keterlambatan pada akun Anda telah selesai dilunasi. Terima kasih atas kepatuhan Anda!</span>
+                    </div>
+                <?php endif; ?>
 
+                <?php if (!empty($myFines)): ?>
                     <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:10px;">
                         <?php foreach ($myFines as $f): ?>
-                            <div style="border:1px solid #fed7aa;background:#fffaf0;border-radius:6px;padding:12px;">
+                            <?php $isLunas = (($f['status_denda'] ?? 'LUNAS') === 'LUNAS'); ?>
+                            <div style="border:1px solid <?= $isLunas ? '#bbf7d0' : '#fecaca' ?>;background:<?= $isLunas ? '#f8fafc' : '#fff5f5' ?>;border-radius:6px;padding:12px;">
                                 <div style="display:flex;justify-content:space-between;align-items:center;">
                                     <span style="font-family:monospace;font-weight:700;color:#1e40af;"><?= e($f['kode_peminjaman']) ?></span>
-                                    <strong style="color:#c2410c;font-size:13px;">Rp <?= number_format((float)$f['denda'], 0, ',', '.') ?></strong>
+                                    <div style="display:flex;align-items:center;gap:6px;">
+                                        <strong style="color:<?= $isLunas ? '#15803d' : '#dc2626' ?>;font-size:13px;">Rp <?= number_format((float)$f['denda'], 0, ',', '.') ?></strong>
+                                        <span style="font-size:10px;font-weight:700;padding:2px 6px;border-radius:10px;background:<?= $isLunas ? '#dcfce7' : '#fee2e2' ?>;color:<?= $isLunas ? '#15803d' : '#b91c1c' ?>;">
+                                            <?= $isLunas ? 'LUNAS' : 'BELUM LUNAS' ?>
+                                        </span>
+                                    </div>
                                 </div>
                                 <div style="font-size:12px;color:#475569;margin-top:4px;">
                                     Tgl Kembali: <?= e(date('d-m-Y', strtotime($f['tanggal_pengembalian']))) ?> &bull; Kondisi: <strong><?= e($f['kondisi_barang']) ?></strong>

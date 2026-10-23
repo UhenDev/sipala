@@ -26,7 +26,7 @@ require_once __DIR__ . '/../../includes/functions.php';
 $scriptDir = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? ''));
 $posAdmin = strpos($scriptDir, '/admin');
 $baseUrl = ($posAdmin !== false) ? substr($scriptDir, 0, $posAdmin) : '';
-$loginUrl = ($baseUrl !== '' ? $baseUrl : '') . '/login.php';
+$loginUrl = ($baseUrl !== '' ? $baseUrl : '') . '/admin/login.php';
 
 // Memastikan pengguna telah terautentikasi dan memiliki peranan admin atau petugas
 if (!isset($_SESSION['user_id'])) { 
@@ -41,8 +41,8 @@ if (!in_array($_SESSION['role'] ?? '', ['admin','petugas'], true)) {
 $pdo = db();
 
 if (!function_exists('e')) {
-    function e(string $v): string { 
-        return htmlspecialchars($v, ENT_QUOTES, 'UTF-8'); 
+    function e(mixed $v): string { 
+        return htmlspecialchars((string)($v ?? ''), ENT_QUOTES, 'UTF-8'); 
     }
 }
 
@@ -57,6 +57,18 @@ if (!function_exists('redirect')) {
     function redirect(string $url): never { 
         header('Location: ' . $url); 
         exit; 
+    }
+}
+
+if (!function_exists('require_admin')) {
+    function require_admin(): void {
+        if (($_SESSION['role'] ?? '') !== 'admin') {
+            flash('error', 'Akses ditolak: Fitur ini hanya dapat diakses oleh Administrator.');
+            $scriptDir = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? ''));
+            $posAdmin = strpos($scriptDir, '/admin');
+            $baseUrl = ($posAdmin !== false) ? substr($scriptDir, 0, $posAdmin) : '';
+            redirect(($baseUrl !== '' ? $baseUrl : '') . '/admin/dashboard.php');
+        }
     }
 }
 
@@ -103,6 +115,8 @@ function page_start(string $title, string $subtitle, string $active): void {
     <link rel="apple-touch-icon" href="<?= e($faviconUrl) ?>">
     <link rel="stylesheet" href="<?= e($adminPrefix) ?>../assets/css/rfid.css">
     <link rel="stylesheet" href="<?= e($adminPrefix) ?>../assets/css/image-cropper-modal.css">
+    <link rel="stylesheet" href="<?= e($adminPrefix) ?>../assets/css/qr-modal.css">
+    <link rel="stylesheet" href="<?= e($adminPrefix) ?>../assets/css/wa-modal.css">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { 
@@ -130,6 +144,7 @@ function page_start(string $title, string $subtitle, string $active): void {
             z-index: 1000;
             transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
+
 
         .sidebar-overlay {
             position: fixed;
@@ -544,12 +559,15 @@ function page_start(string $title, string $subtitle, string $active): void {
         <button type="button" class="sidebar-close-btn" id="sidebarClose" aria-label="Tutup Menu">&times;</button>
     </div>
     <nav class="menu">
-        <div class="menu-title">Menu Utama</div>
+        <div class="menu-title">Operasional Lab</div>
         <a class="menu-item <?= $active==='dashboard'?'active':''?>" href="<?= e($adminPrefix) ?>dashboard.php">
             <span class="menu-icon">&#x2302;</span><span>Dashboard</span>
         </a>
-        <a class="menu-item <?= $active==='pengguna'?'active':''?>" href="<?= e($adminPrefix) ?>pengguna/index.php">
-            <span class="menu-icon">&#x2659;</span><span>Pengguna</span>
+        <a class="menu-item <?= $active==='peminjaman'?'active':''?>" href="<?= e($adminPrefix) ?>peminjaman/index.php">
+            <span class="menu-icon">&#x21c4;</span><span>Peminjaman</span>
+        </a>
+        <a class="menu-item <?= $active==='pengembalian'?'active':''?>" href="<?= e($adminPrefix) ?>pengembalian/index.php">
+            <span class="menu-icon">&#x21a9;</span><span>Pengembalian & Denda</span>
         </a>
         <a class="menu-item <?= $active==='kategori'?'active':''?>" href="<?= e($adminPrefix) ?>kategori/index.php">
             <span class="menu-icon">&#x25a4;</span><span>Kategori</span>
@@ -560,24 +578,26 @@ function page_start(string $title, string $subtitle, string $active): void {
         <a class="menu-item <?= $active==='unit'?'active':''?>" href="<?= e($adminPrefix) ?>unit/index.php">
             <span class="menu-icon">&#x25a6;</span><span>Unit Alat Fisik</span>
         </a>
-        <a class="menu-item <?= $active==='peminjaman'?'active':''?>" href="<?= e($adminPrefix) ?>peminjaman/index.php">
-            <span class="menu-icon">&#x21c4;</span><span>Peminjaman</span>
-        </a>
-        <a class="menu-item <?= $active==='pengembalian'?'active':''?>" href="<?= e($adminPrefix) ?>pengembalian/index.php">
-            <span class="menu-icon">&#x21a9;</span><span>Pengembalian & Denda</span>
+        <a class="menu-item <?= $active==='rfid'?'active':''?>" href="<?= e($adminPrefix) ?>rfid/index.php">
+            <span class="menu-icon">&#x25ce;</span><span>Kartu RFID</span>
         </a>
         <a class="menu-item <?= $active==='laporan'?'active':''?>" href="<?= e($adminPrefix) ?>laporan/index.php">
             <span class="menu-icon">&#x25a7;</span><span>Laporan</span>
         </a>
-        <a class="menu-item <?= $active==='rfid'?'active':''?>" href="<?= e($adminPrefix) ?>rfid/index.php">
-            <span class="menu-icon">&#x25ce;</span><span>Kartu RFID</span>
+
+        <?php if ($role === 'admin'): ?>
+        <div class="menu-title" style="margin-top:14px;">Sistem & Otoritas</div>
+        <a class="menu-item <?= $active==='pengguna'?'active':''?>" href="<?= e($adminPrefix) ?>pengguna/index.php">
+            <span class="menu-icon">&#x2659;</span><span>Kelola Pengguna</span>
         </a>
         <a class="menu-item <?= $active==='log'?'active':''?>" href="<?= e($adminPrefix) ?>log/index.php">
             <span class="menu-icon">&#x25a5;</span><span>Audit Log</span>
         </a>
         <a class="menu-item <?= $active==='pengaturan'?'active':''?>" href="<?= e($adminPrefix) ?>pengaturan.php">
-            <span class="menu-icon">&#x2699;</span><span>Pengaturan</span>
+            <span class="menu-icon">&#x2699;</span><span>Pengaturan Lab</span>
         </a>
+        <?php endif; ?>
+
         <div class="menu-title" style="margin-top:14px;">Akun</div>
         <a class="menu-item <?= $active==='profil'?'active':''?>" href="<?= e($adminPrefix) ?>../profil.php">
             <span class="menu-icon">&#x263a;</span><span>Profil Saya</span>
@@ -778,6 +798,9 @@ document.addEventListener("DOMContentLoaded", function() {
     }
 })();
 </script>
+<script src="<?= e($adminPrefix) ?>../assets/js/qrcode.min.js"></script>
+<script src="<?= e($adminPrefix) ?>../assets/js/qr-modal.js"></script>
+<script src="<?= e($adminPrefix) ?>../assets/js/wa-modal.js"></script>
 </body>
 </html>
 <?php 

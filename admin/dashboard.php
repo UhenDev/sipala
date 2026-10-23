@@ -55,7 +55,7 @@ $stmtWaiting = $pdo->query("
     SELECT p.id, p.kode_peminjaman, p.tanggal_pengajuan, p.tanggal_rencana_kembali, p.status, p.keperluan,
            u.nama AS nama_peminjam, u.nis, u.kelas,
            COALESCE(SUM(d.jumlah), 0) AS total_item,
-           GROUP_CONCAT(CONCAT(pr.nama_barang, ' (', d.jumlah, ')') SEPARATOR ', ') AS daftar_alat
+           GROUP_CONCAT(CONCAT(COALESCE(pr.nama_barang, d.nama_barang_snapshot, 'Alat'), ' (', d.jumlah, ')') SEPARATOR ', ') AS daftar_alat
     FROM peminjaman p
     JOIN users u ON u.id = p.user_id
     LEFT JOIN detail_peminjaman d ON d.peminjaman_id = p.id
@@ -73,7 +73,7 @@ $stmtOverdue = $pdo->query("
            u.nama AS nama_peminjam, u.nis, u.kelas, u.no_hp,
            DATEDIFF(CURDATE(), p.tanggal_rencana_kembali) AS terlambat_hari,
            COALESCE(SUM(d.jumlah), 0) AS total_item,
-           GROUP_CONCAT(CONCAT(pr.nama_barang, ' (', d.jumlah, ')') SEPARATOR ', ') AS daftar_alat
+           GROUP_CONCAT(CONCAT(COALESCE(pr.nama_barang, d.nama_barang_snapshot, 'Alat'), ' (', d.jumlah, ')') SEPARATOR ', ') AS daftar_alat
     FROM peminjaman p
     JOIN users u ON u.id = p.user_id
     LEFT JOIN detail_peminjaman d ON d.peminjaman_id = p.id
@@ -85,15 +85,19 @@ $stmtOverdue = $pdo->query("
 ");
 $overdueLoans = $stmtOverdue->fetchAll();
 
-// 3. Log Aktivitas Terakhir
-$stmtRecentLogs = $pdo->query("
-    SELECT l.*, u.nama AS nama_user, u.username
-    FROM log_aktivitas l
-    LEFT JOIN users u ON u.id = l.user_id
-    ORDER BY l.id DESC
-    LIMIT 6
-");
-$recentLogs = $stmtRecentLogs->fetchAll();
+// 3. Log Aktivitas Terakhir (Khusus Administrator)
+$isAdmin = (($_SESSION['role'] ?? '') === 'admin');
+$recentLogs = [];
+if ($isAdmin) {
+    $stmtRecentLogs = $pdo->query("
+        SELECT l.*, u.nama AS nama_user, u.username
+        FROM log_aktivitas l
+        LEFT JOIN users u ON u.id = l.user_id
+        ORDER BY l.id DESC
+        LIMIT 6
+    ");
+    $recentLogs = $stmtRecentLogs->fetchAll();
+}
 
 // 4. Master Peralatan Ringkasan Terkini
 $recentEquipment = $pdo->query("
@@ -116,7 +120,7 @@ page_start('Dashboard Laboratorium', 'Ringkasan operasional dan pemantauan inven
 <div class="head">
     <div>
         <h2>Dashboard Pengelolaan Laboratorium</h2>
-        <p>Ringkasan data inventaris alat fisik, permohonan peminjaman aktif, keterlambatan, dan log audit.</p>
+        <p><?= $isAdmin ? 'Ringkasan data inventaris alat fisik, permohonan peminjaman aktif, keterlambatan, dan log audit.' : 'Ringkasan operasional inventaris laboratorium, sirkulasi peminjaman, dan jatuh tempo.' ?></p>
     </div>
     <div class="actions">
         <a class="btn" href="peminjaman/index.php">Daftar Peminjaman</a>
@@ -347,7 +351,26 @@ page_start('Dashboard Laboratorium', 'Ringkasan operasional dan pemantauan inven
                                     <?php endif; ?>
                                 </td>
                                 <td style="text-align:right;">
-                                    <a class="btn btn-sm btn-primary" href="pengembalian/index.php?rfid=<?= urlencode($ol['kode_peminjaman']) ?>">Terima</a>
+                                    <?php
+                                    $rawHp = (string)($ol['no_hp'] ?? '');
+                                    $cleanPhone = preg_replace('/[^0-9]/', '', $rawHp);
+                                    if (str_starts_with($cleanPhone, '0')) {
+                                        $cleanPhone = '62' . substr($cleanPhone, 1);
+                                    }
+                                    $waText = "Halo {$ol['nama_peminjam']}, kami dari Lab Komputer RPL SMKN 1 Panyingkiran mengingatkan bahwa peminjaman alat: {$ol['daftar_alat']} (Kode: {$ol['kode_peminjaman']}) telah melewati batas pengembalian (" . date('d-m-Y', strtotime($ol['tanggal_rencana_kembali'])) . ")." . ($late > 0 ? " Keterlambatan: {$late} hari (Estimasi Denda: " . format_rupiah($estFine) . ")." : "") . " Mohon segera mengembalikan alat tersebut ke ruang laboratorium. Terima kasih.";
+                                    $waLink = $cleanPhone !== '' ? "https://wa.me/{$cleanPhone}?text=" . urlencode($waText) : '';
+                                    ?>
+                                    <div class="actions" style="justify-content:flex-end;gap:5px;">
+                                        <?php if ($waLink !== ''): ?>
+                                            <a class="btn btn-sm" href="<?= $waLink ?>" target="_blank" rel="noopener"
+                                               style="background:#22c55e;color:#ffffff;border:none;font-size:11px;padding:4px 8px;display:inline-flex;align-items:center;gap:4px;"
+                                               title="Kirim pengingat WhatsApp ke <?= e($rawHp) ?>">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
+                                                WA
+                                            </a>
+                                        <?php endif; ?>
+                                        <a class="btn btn-sm btn-primary" href="pengembalian/index.php?rfid=<?= urlencode($ol['kode_peminjaman']) ?>">Terima</a>
+                                    </div>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
@@ -362,7 +385,8 @@ page_start('Dashboard Laboratorium', 'Ringkasan operasional dan pemantauan inven
 <!-- PANEL BAWAH: AUDIT LOG TERBARU & RINGKASAN KATEGORI -->
 <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(460px, 1fr));gap:20px;">
 
-    <!-- AUDIT TRAIL AKTIVITAS -->
+    <?php if ($isAdmin): ?>
+    <!-- AUDIT TRAIL AKTIVITAS (KHUSUS ADMINISTRATOR) -->
     <div class="panel">
         <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;">
             <span>Aktivitas Laboratorium Terkini (Audit Log)</span>
@@ -407,6 +431,7 @@ page_start('Dashboard Laboratorium', 'Ringkasan operasional dan pemantauan inven
             </table>
         </div>
     </div>
+    <?php endif; ?>
 
     <!-- RINGKASAN MASTER PERALATAN TERKINI -->
     <div class="panel">

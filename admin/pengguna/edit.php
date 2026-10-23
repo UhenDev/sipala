@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../includes/admin.php';
+require_admin();
 
 $id = (int)($_GET['id'] ?? 0);
 if ($id <= 0) {
@@ -178,47 +179,31 @@ page_start('Edit Pengguna & RFID', 'Perbarui data siswa atau daftarkan kartu chi
     <a class="btn" href="index.php">Kembali</a>
 </div>
 
-<!-- RFID READER SCANNING BOX -->
-<div class="rfid-box" style="margin-bottom:24px;">
-    <div style="display:flex;align-items:center;gap:18px;">
-        <div class="rfid-wave-icon">📶</div>
-        <div style="flex:1;">
-            <h3 style="margin:0 0 4px 0;font-size:16px;color:#ffffff;">Reader RFID Siswa</h3>
-            <p style="margin:0;font-size:13px;color:#94a3b8;">
-                Untuk mendaftarkan atau mengganti kartu pintar siswa ini, <strong>tempelkan kartu baru pada alat reader USB</strong>.
-            </p>
-        </div>
-        <div>
-            <?php if (!empty($user['rfid_uid'])): ?>
-                <span class="rfid-badge rfid-badge-active" style="padding:8px 14px;font-size:13px;">
-                    💳 Chip Terpasang: <?= e($user['rfid_uid']) ?>
-                </span>
-            <?php else: ?>
-                <span class="rfid-badge rfid-badge-inactive" style="padding:8px 14px;font-size:13px;">
-                    ⚠️ Belum Ada Chip
-                </span>
-            <?php endif; ?>
-        </div>
-    </div>
-</div>
-
 <div class="form-panel">
     <form method="post" enctype="multipart/form-data">
         <?= csrf_field() ?>
         <div class="grid">
             <!-- RFID UID INPUT -->
-            <div class="field full" style="background:#f1f5f9;padding:16px;border-radius:10px;border:2px dashed #93c5fd;">
-                <label style="color:#1e40af;display:flex;align-items:center;gap:8px;">
-                    <span>💳 NOMOR CHIP KARTU RFID (UID)</span>
-                    <span style="font-size:11px;background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:12px;font-weight:700;">READER INPUT</span>
+            <div class="field full">
+                <label for="rfid_uid" style="display:flex;align-items:center;justify-content:space-between;">
+                    <span>Nomor Kartu / UID RFID (Opsional)</span>
+                    <?php if (!empty($user['rfid_uid'])): ?>
+                        <span class="rfid-badge rfid-badge-active" style="font-size:11.5px;padding:3px 8px;">
+                            ✓ Terpasang: <?= e($user['rfid_uid']) ?>
+                        </span>
+                    <?php else: ?>
+                        <span class="rfid-badge rfid-badge-inactive" style="font-size:11.5px;padding:3px 8px;">
+                            Belum Ada Kartu
+                        </span>
+                    <?php endif; ?>
                 </label>
-                <div style="display:flex;gap:10px;margin-top:6px;">
+                <div style="display:flex;gap:10px;">
                     <input type="text" name="rfid_uid" id="rfid_uid" value="<?= e($user['rfid_uid'] ?? '') ?>" 
                            placeholder="Tempelkan kartu siswa ke reader (atau ketik UID)..." 
                            class="rfid-autofocus" data-rfid-scanner="true"
-                           style="flex:1;font-family:monospace;font-size:16px;letter-spacing:1px;font-weight:700;background:#ffffff;border-color:#3b82f6;">
-                    <button type="button" class="btn btn-primary" onclick="document.getElementById('rfid_uid').focus();">
-                        📡 Siapkan Reader
+                           style="flex:1;font-family:'JetBrains Mono', monospace;font-size:14px;letter-spacing:1px;font-weight:600;">
+                    <button type="button" class="btn" onclick="document.getElementById('rfid_uid').focus();" style="white-space:nowrap;">
+                        Fokus Reader
                     </button>
                 </div>
             </div>
