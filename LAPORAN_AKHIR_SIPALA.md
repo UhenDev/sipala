@@ -64,7 +64,7 @@
 | :--- | :--- |
 | **Nama Aplikasi** | **SIPALA** (*Sistem Informasi Peminjaman Alat Laboratorium*) |
 | **Instansi Pengguna** | SMKN 1 Panyingkiran — Laboratorium Rekayasa Perangkat Lunak |
-| **Versi Rilis** | **v2.0.0 (Full Production Ready / Siap Operasional)** |
+| **Versi** | Belum dicantumkan secara konsisten pada kode sumber |
 | **Tahun Pengembangan** | 2026 |
 | **Basis Arsitektur** | Web Application (Client-Server, Intranet & Internet Ready) |
 | **Bahasa Pemrograman** | PHP 8.1+ (Native Strict Types, Clean Architecture, Zero-Bloatware) |
@@ -90,10 +90,10 @@ Sebelum diimplementasikannya aplikasi **SIPALA**, tata kelola laboratorium mengh
 - **Pemisahan Konsep Master Alat vs Unit Fisik Individual**, di mana setiap fisik alat memiliki Kode Unit (contoh: `LPT-001`), Nomor Seri Pabrik (*Serial Number*), Tag UID RFID fisik, serta catatan riwayat kondisi (*Baik/Rusak Ringan/Rusak Berat*).
 - **Integrasi Kartu RFID Ganda (Dual-Purpose RFID):** Mendukung autentikasi login kilat siswa/petugas (1 detik *touchless login*) serta serah terima unit barang tanpa sentuh keyboard.
 - **Generator Kode QR & Barcode Code 128 Vektor SVG Mandiri (100% Offline):** Menghasilkan stiker label inventaris tajam beresolusi tinggi tanpa dependensi library pihak ketiga atau koneksi internet.
-- **Bot Notifikasi WhatsApp Interaktif:** Mengirimkan pesan real-time otomatis saat pengajuan dibuat, disetujui, barang diserahterimakan, pengingat jatuh tempo H-1, serta bukti pengembalian dan denda.
+- **Notifikasi WhatsApp:** Kode mengirim notifikasi pada beberapa kejadian transaksi, dan menyediakan pengiriman pengingat oleh petugas. Penjadwalan pengingat H-1 otomatis belum terverifikasi.
 - **Arsitektur Keamanan Berlapis (Enterprise-Grade Security):** Dilengkapi proteksi SQL Injection berbasis PDO Prepared Statements, proteksi ganda Cross-Site Request Forgery (CSRF), sanitasi XSS terstandarisasi, enkripsi password BCRYPT, brute-force login lockout 30 detik, dan row-level locking (`SELECT ... FOR UPDATE`) untuk mencegah *race condition* stok.
 
-Hasil pengujian komprehensif membuktikan bahwa sistem beroperasi dengan stabilitas 100%, memangkas waktu serah terima alat hingga lebih dari 75%, dan menjamin akuntabilitas aset laboratorium sekolah.
+Repositori memperlihatkan implementasi modul inventaris, transaksi peminjaman, pengembalian, RFID, QR/barcode, notifikasi, dan administrasi. Angka stabilitas, penghematan waktu, dan penurunan keterlambatan memerlukan catatan pengujian lapangan tersendiri; angka tersebut tidak disimpulkan hanya dari pemeriksaan kode.
 
 ---
 
@@ -181,7 +181,7 @@ Modul komunikasi di dalam `includes/whatsapp.php` memungkinkan sistem bertindak 
 ## 5. BAB III: PERANCANGAN SISTEM & BASIS DATA
 
 ### 3.1 Alur Transaksi & Diagram Sirkulasi Alat
-Siklus hidup peminjaman alat diatur dalam sebuah *State Machine* terstruktur yang mencegah ambiguitas status:
+Alur berikut menjelaskan proses yang berjalan pada aplikasi. Siswa mengajukan permohonan dari katalog setelah masuk; sistem menyimpan transaksi berstatus `MENUNGGU`. Laboran kemudian menyetujui atau menolak permohonan. Setelah disetujui, siswa datang ke laboratorium dan petugas mencatat serah terima; status menjadi `DIPINJAM` dan unit fisik yang diserahkan ditandai sedang dipinjam. Pada pengembalian, petugas mencari transaksi, memeriksa kondisi barang, menghitung keterlambatan dan denda, lalu menyimpan hasil. Transaksi selesai dan status unit/stok diperbarui. Pengembalian langsung melalui konsol petugas juga tersedia. Pengingat WhatsApp dapat dikirim petugas secara manual; repositori tidak menunjukkan penjadwalan otomatis H-1.
 
 ```mermaid
 stateDiagram-v2
@@ -189,12 +189,21 @@ stateDiagram-v2
     MENUNGGU --> DITOLAK : Laboran Menolak (Stok Kosong / Pelanggaran)
     MENUNGGU --> DISETUJUI : Laboran Menyetujui Permohonan
     DISETUJUI --> DIPINJAM : Serah Terima Barang Fisik (Tap Kartu RFID / Verifikasi)
-    DIPINJAM --> MENUNGGU_PENGEMBALIAN : Siswa Konfirmasi Pengembalian / Jatuh Tempo
-    MENUNGGU_PENGEMBALIAN --> SELESAI : Petugas Cek Fisik Unit & Konfirmasi Selesai
+    DIPINJAM --> MENUNGGU_PENGEMBALIAN : Status antara bila dipakai
+    MENUNGGU_PENGEMBALIAN --> SELESAI : Petugas memeriksa dan menyimpan pengembalian
     DIPINJAM --> SELESAI : Pengembalian Langsung di Meja Laboran
     SELESAI --> [*]
     DITOLAK --> [*]
 ```
+
+#### Urutan penggunaan menurut peran
+
+1. **Siswa:** membuat akun atau masuk, melihat katalog dan stok yang tersedia, memilih alat/tanggal/keperluan, lalu mengirim pengajuan. Siswa dapat memantau status dan membatalkan pengajuan yang masih menunggu.
+2. **Petugas/Admin:** masuk ke panel admin, memeriksa pengajuan, lalu menyetujui atau menolak. Ketika barang benar-benar diserahkan, petugas mencatat serah terima dan unit fisik yang keluar. Persetujuan dan serah terima adalah dua langkah berbeda.
+3. **Pengembalian:** petugas mencari pinjaman aktif, memeriksa unit dan kondisinya, mengisi catatan serta menyimpan pengembalian. Aplikasi menghitung hari keterlambatan dan denda berdasarkan tarif yang dikonfigurasi, menyimpan status pembayaran, memperbarui status unit dan stok, serta mencatat aktivitas.
+4. **Pengelola:** mengatur master alat, unit, kategori, pengguna, RFID, tarif, laporan, serta konfigurasi pesan. Pesan WhatsApp bergantung pada gateway dan konfigurasi yang tersedia; pengingat dapat dikirim petugas.
+
+Status pada implementasi mencakup `MENUNGGU`, `DISETUJUI`, `SIAP_DIAMBIL`, `DIPINJAM`, `MENUNGGU_PENGEMBALIAN`, `SELESAI`, `DITOLAK`, `TERLAMBAT`, dan `DIBATALKAN`. Beberapa status merupakan status khusus/legacy dan tidak semuanya dipakai dalam jalur utama.
 
 ### 3.2 Diagram Hubungan Entitas (Entity-Relationship Diagram / ERD)
 Hubungan antar-tabel dalam database `sipala` dirancang dengan normalisasi tingkat ketiga (3NF) guna menjamin konsistensi data:
@@ -225,7 +234,8 @@ erDiagram
     }
 ```
 
-### 3.3 Kamus Data & Spesifikasi 11 Tabel Basis Data
+### 3.3 Ringkasan 11 Tabel Basis Data
+Dump `database/SIPALA.sql` memuat 11 tabel. Nama kolom dan enum di bawah ini perlu merujuk pada dump tersebut; beberapa nama/enum dalam uraian versi sebelumnya tidak sama dengan skema aktual. Untuk detail lengkap, gunakan definisi `CREATE TABLE` di dump sebagai acuan.
 
 #### 1. Tabel `users` (Data Pengguna & Civitas Lab)
 Menyimpan seluruh akun pengguna sistem yang terbagi ke dalam 3 peranan hierarkis.
@@ -370,7 +380,7 @@ Fungsi `sync_peralatan_stock($peralatanId)` di dalam `includes/functions.php` se
 - **Kartu Identitas Laboratorium Digital:** Di halaman `profil.php`, siswa disajikan kartu identitas digital interaktif yang memuat foto siswa, NIS, kelas, nomor kontak WhatsApp, status aktivasi kartu RFID, serta fitur *cropper* foto profil terintegrasi.
 - **Pusat Notifikasi Interaktif:** Tanda lonceng notifikasi real-time yang memperbarui status pengajuan tanpa reload halaman (*AJAX-powered* via `api_notif_read.php`).
 
-### 4.2 Modul Autentikasi Ganda & Keamanan Sesi (`login.php`, `admin/login.php`)
+### 4.2 Modul Autentikasi Terpadu & Keamanan Sesi (`login.php`)
 - **Login Kartu RFID Instan:** Siswa atau petugas cukup menempelkan kartu identitas ke USB RFID reader di meja lab. Sistem langsung memverifikasi UID, mencocokkan akun aktif, dan melakukan *auto-login* dalam waktu 1 detik tanpa perlu menyentuh keyboard.
 - **Login Tradisional Berproteksi:** Opsi login standar menggunakan NIS/Username dan password BCRYPT yang diperkuat dengan mekanisme *rate-limiting lockout* otomatis setelah 5 kali gagal.
 - **Pemisahan Jalur Otorisasi:** Proteksi berbasis role menjamin siswa tidak dapat mengakses halaman administratif (`/admin/`), sementara petugas/admin diarahkan ke panel operasional laboratorium.
@@ -409,9 +419,9 @@ Fungsi `sync_peralatan_stock($peralatanId)` di dalam `includes/functions.php` se
 - **Registrasi & Penautan Kartu:** Mendaftarkan kartu RFID baru dan mengaitkannya secara fleksibel ke akun pengguna (siswa/laboran) atau ke unit fisik peralatan.
 - **Audit Tap & Status Kartu:** Mengelola status kartu (*aktif/nonaktif*) sehingga kartu siswa yang hilang dapat langsung diblokir agar tidak disalahgunakan orang lain.
 
-### 4.9 Modul Gateway Notifikasi & Bot WhatsApp Interaktif (`includes/whatsapp.php`)
+### 4.9 Modul Gateway Notifikasi & Bot WhatsApp (`includes/whatsapp.php`)
 - **Pemberitahuan Otomatis Tanpa Pulsa SMS:** Mengirimkan pesan WhatsApp instan saat permohonan diajukan, permohonan disetujui, serah terima alat selesai, dan pengembalian terverifikasi.
-- **Peringatan Batas Tempo (Early-Warning):** Laboran dapat memicu pengingat jatuh tempo H-1 langsung ke nomor WhatsApp siswa dengan sekali klik via endpoint `admin/api_send_wa.php`.
+- **Pengingat Batas Tempo:** Laboran dapat mengirim pesan pengingat ke nomor WhatsApp siswa melalui endpoint `admin/api_send_wa.php`. Pengiriman terjadwal otomatis H-1 belum terverifikasi pada kode yang ditinjau.
 - **Pusat Pengujian & Konfigurasi Bot:** Fasilitas uji kirim pesan (*Live Test Connection*) di menu pengaturan admin untuk memvalidasi token dan nomor penerima secara langsung (`admin/api_test_wa.php`).
 
 ### 4.10 Modul Rekapitulasi Laporan & Ekspor Data (`admin/laporan/index.php`)
@@ -431,28 +441,30 @@ Fungsi `sync_peralatan_stock($peralatanId)` di dalam `includes/functions.php` se
 ## 7. BAB V: PENGUJIAN SISTEM (TESTING & QUALITY ASSURANCE)
 
 ### 5.1 Metodologi Pengujian
-Pengujian aplikasi SIPALA dilakukan menggunakan metode **Black Box Testing** (pengujian fungsionalitas antarmuka dan validasi alur input-output) serta **Security Penetration Testing** skala lokal pada lingkungan server XAMPP SMKN 1 Panyingkiran.
+Pemeriksaan dokumen ini membandingkan klaim laporan dengan kode sumber dan dump SQL yang tersedia. Pemeriksaan tersebut bukan pengujian runtime, uji penetrasi, maupun pengukuran kinerja. Hasil uji fungsional perlu dilengkapi tanggal, lingkungan, langkah uji, bukti, dan pelaksana sebelum dinyatakan lulus.
 
-### 5.2 Matriks Hasil Pengujian (16 Test Cases)
+### 5.2 Skenario Uji yang Disarankan (Status Belum Dibuktikan dalam Dokumen)
+
+Tabel berikut adalah daftar skenario untuk dijalankan dan dicatat. Status `PASSED` pada versi terdahulu tidak didukung artefak hasil uji yang dapat diverifikasi dari repositori, sehingga tidak dipertahankan sebagai kesimpulan.
 
 | ID Kasus | Skenario Pengujian | Masukan / Aksi | Hasil yang Diharapkan | Status |
 | :---: | :--- | :--- | :--- | :---: |
-| **TC-01** | Autentikasi Kredensial Salah | Username benar, password keliru | Sistem menolak login, memunculkan notifikasi kesalahan, dan mencatat percobaan gagal | **PASSED** |
-| **TC-02** | Proteksi Brute-Force Login | Salah memasukkan password 5 kali berturut-turut | Sistem mengunci form login (*lockout*) selama 30 detik untuk IP terkait | **PASSED** |
-| **TC-03** | Login Kilat Tap Kartu RFID | Tempelkan kartu siswa terdaftar ke RFID Reader | Sistem membaca UID, mengidentifikasi siswa, dan melakukan auto-login < 1 detik | **PASSED** |
-| **TC-04** | Otorisasi Batasan Role Akses | Akun siswa mencoba mengakses URL `/admin/dashboard.php` | Sistem menolak akses, menampilkan flash message, dan mengalihkan ke `/index.php` | **PASSED** |
-| **TC-05** | Pengajuan Pinjaman oleh Siswa | Siswa memilih alat di katalog, durasi 3 hari, keperluan "Praktik IoT" | Transaksi terbentuk dengan kode unik, status `MENUNGGU`, notifikasi terkirim | **PASSED** |
-| **TC-06** | Validasi Kuota Maksimal Unit | Siswa mengajukan jumlah alat melebihi batas pengaturan lab | Formulir ditolak dengan pesan peringatan pembatasan kuota | **PASSED** |
-| **TC-07** | Persetujuan & Alokasi Unit Fisik | Laboran menyetujui dan mengalokasikan unit `LPT-001` | Status transaksi menjadi `DISETUJUI`, unit terkunci untuk peminjam | **PASSED** |
-| **TC-08** | Serah Terima Alat via Kartu RFID | Siswa melakukan tap kartu saat mengambil barang di lab | Status transaksi beralih ke `DIPINJAM`, status unit fisik menjadi `DIPINJAM` | **PASSED** |
-| **TC-09** | Sinkronisasi Stok Otomatis | Unit fisik dialokasikan keluar | Stok tersedia pada master `peralatan` otomatis berkurang 1 secara instan | **PASSED** |
-| **TC-10** | Pengembalian Tepat Waktu | Siswa mengembalikan alat sebelum tanggal tempo dalam kondisi baik | Denda dihitung Rp 0, status transaksi `SELESAI`, unit fisik kembali `TERSEDIA` | **PASSED** |
-| **TC-11** | Kalkulasi Denda Terlambat | Pengembalian terlambat 3 hari (tarif Rp 3.000/hari) | Sistem otomatis menetapkan denda Rp 9.000 dengan status `BELUM LUNAS` | **PASSED** |
-| **TC-12** | Pelunasan Denda Tunai | Laboran mengonfirmasi penerimaan denda di modal pelunasan | Status denda berubah menjadi `LUNAS`, mutasi terekam di audit log | **PASSED** |
-| **TC-13** | Generator Stiker Label & Barcode | Membuka `admin/unit/cetak_label.php` | Label stiker ber-QR Code SVG dan Barcode Code 128 tampil tajam siap cetak | **PASSED** |
-| **TC-14** | Resolusi QR Code Real-Time | Memindai QR Code stiker fisik via kamera smartphone | Terbuka halaman `scan.php` dengan rincian unit dan status alat terkini | **PASSED** |
-| **TC-15** | Integrasi Notifikasi WhatsApp | Memicu tombol "Kirim Pengingat WA" pada transaksi aktif | Pesan WhatsApp terkirim ke nomor siswa via gateway Fonnte / Wablas | **PASSED** |
-| **TC-16** | Pengujian Proteksi CSRF & SQLi | Mengirim POST request tanpa token CSRF dan menyuntikkan SQL payload | Permintaan ditolak (*403 Forbidden*) dan SQL payload dinetralkan oleh PDO | **PASSED** |
+| **TC-01** | Autentikasi Kredensial Salah | Username benar, password keliru | Sistem menolak login dan menampilkan pesan kesalahan | **Belum diuji di laporan ini** |
+| **TC-02** | Proteksi Brute-Force Login | Salah memasukkan password 5 kali berturut-turut | Sistem memberi jeda login sesuai implementasi | **Belum diuji di laporan ini** |
+| **TC-03** | Login Tap Kartu RFID | Tempelkan kartu terdaftar ke reader HID | Sistem membaca UID dan memproses login | **Belum diuji di laporan ini** |
+| **TC-04** | Otorisasi Role | Akun siswa mencoba membuka halaman admin | Sistem menolak akses | **Belum diuji di laporan ini** |
+| **TC-05** | Pengajuan Pinjaman | Siswa memilih alat dan mengirim keperluan | Transaksi dibuat berstatus `MENUNGGU` | **Belum diuji di laporan ini** |
+| **TC-06** | Validasi Kuota | Jumlah melebihi batas pengaturan | Sistem menolak pengajuan | **Belum diuji di laporan ini** |
+| **TC-07** | Persetujuan Pengajuan | Laboran menyetujui permohonan | Status berubah sesuai alur persetujuan | **Belum diuji di laporan ini** |
+| **TC-08** | Serah Terima Alat | Petugas mencatat unit yang diserahkan | Transaksi dan unit berubah menjadi dipinjam | **Belum diuji di laporan ini** |
+| **TC-09** | Sinkronisasi Stok | Unit dialokasikan/dikembalikan | Stok master sesuai unit tersedia | **Belum diuji di laporan ini** |
+| **TC-10** | Pengembalian Tepat Waktu | Petugas menerima unit sebelum jatuh tempo | Denda nol dan transaksi selesai | **Belum diuji di laporan ini** |
+| **TC-11** | Kalkulasi Denda | Pengembalian terlambat dengan tarif yang dikonfigurasi | Denda sesuai jumlah hari dan tarif | **Belum diuji di laporan ini** |
+| **TC-12** | Pelunasan Denda | Petugas mencatat pelunasan | Status denda menjadi lunas | **Belum diuji di laporan ini** |
+| **TC-13** | Cetak Label | Membuka halaman label unit | Label dapat ditampilkan dan dicetak | **Belum diuji di laporan ini** |
+| **TC-14** | Resolusi QR | Memindai label QR unit | Halaman informasi unit terbuka | **Belum diuji di laporan ini** |
+| **TC-15** | Integrasi WhatsApp | Mengirim pesan melalui gateway yang sudah dikonfigurasi | Catat hasil gateway dan penerimaan pesan | **Belum diuji di laporan ini** |
+| **TC-16** | Proteksi CSRF dan Query | Kirim POST tanpa token dan uji input query | Permintaan tanpa token ditolak; query parameter memakai binding | **Belum diuji di laporan ini** |
 
 ### 5.3 Riwayat Evaluasi dan Resolusi Bug
 Dalam tahapan pematangan sistem sebelum rilis final, terdapat catatan bug minor yang telah berhasil dituntaskan secara menyeluruh:
@@ -529,8 +541,8 @@ Pada instalasi awal sistem, tersedia akun administratif bawaan:
 
 | Peranan | URL Halaman Masuk | Username / NIS | Kata Sandi Bawaan |
 | :--- | :--- | :---: | :---: |
-| **Administrator Utama** | `http://localhost/SIPALA/admin/login.php` | `admin` | `admin123` |
-| **Petugas / Laboran** | `http://localhost/SIPALA/admin/login.php` | `petugas` | `admin123` |
+| **Administrator Utama** | `http://localhost/SIPALA/login.php` | `admin` | `admin123` |
+| **Petugas / Laboran** | `http://localhost/SIPALA/login.php` | `petugas` | `admin123` |
 | **Peminjam / Siswa** | `http://localhost/SIPALA/login.php` | *Daftar Mandiri via `register.php`* | *Sesuai Registrasi* |
 
 > [!CAUTION]
@@ -550,17 +562,17 @@ Pada instalasi awal sistem, tersedia akun administratif bawaan:
 
 ### 7.1 Kesimpulan Capaian Proyek
 Berdasarkan seluruh tahapan perancangan, pengembangan, pengujian, dan implementasi yang telah dilaksanakan, dapat disimpulkan bahwa:
-1. Pengembangan aplikasi **SIPALA (Sistem Informasi Peminjaman Alat Laboratorium)** untuk Laboratorium RPL SMKN 1 Panyingkiran telah **terselesaikan 100%** dengan predikat *Production Ready*.
-2. Inovasi **pemisahan master katalog dan unit fisik individual** berhasil memecahkan permasalahan historis laboratorium terkait pelacakan nomor seri, riwayat kerusakan barang, dan akuntabilitas peminjam.
-3. Integrasi teknologi **USB RFID Reader** dan **Generator QR Code Vektor Mandiri** terbukti secara nyata memangkas durasi antrean serah terima alat laboratorium dari yang semula memerlukan waktu rata-rata 3-5 menit per transaksi menjadi **kurang dari 30 detik**.
-4. Otomasi **kalkulasi denda keterlambatan** dan **notifikasi Bot WhatsApp interaktif** berhasil menegakkan kedisiplinan pengembalian alat serta meminimalisir potensi kehilangan aset laboratorium sekolah.
+1. Repositori berisi aplikasi **SIPALA (Sistem Informasi Peminjaman Alat Laboratorium)** dengan modul utama untuk inventaris, akun, transaksi, pengembalian, notifikasi, dan administrasi. Kesiapan produksi harus diputuskan setelah deployment dan pengujian pada lingkungan sasaran.
+2. Pemisahan **master katalog dan unit fisik individual** menyediakan struktur untuk mencatat nomor seri, kondisi, serta status tiap unit dan menghubungkannya dengan transaksi.
+3. Aplikasi menyediakan jalur input RFID/QR untuk membantu identifikasi. Dampak terhadap waktu layanan belum diukur dalam bukti yang tersedia.
+4. Aplikasi menyediakan **kalkulasi denda keterlambatan** dan **notifikasi WhatsApp**. Dampaknya terhadap ketepatan pengembalian perlu diukur setelah penggunaan operasional.
 5. Sistem memenuhi standar keamanan modern melalui implementasi PDO Prepared Statements anti-SQLi, proteksi ganda anti-CSRF, enkripsi password BCRYPT, anti-XSS, dan proteksi serangan *brute-force*.
 
 ### 7.2 Dampak Efisiensi Operasional Laboratorium
 Implementasi SIPALA memberikan dampak nyata pada operasional harian laboratorium:
-- **Efisiensi Waktu Pelayanan:** Pengurangan waktu administrasi serah terima barang sebesar **> 75%**.
-- **Ketepatan Data Inventaris:** Akurasi pencatatan unit fisik dan status kerusakan mencapai **100%**.
-- **Penurunan Angka Keterlambatan:** Peringatan dini via WhatsApp berhasil menurunkan potensi keterlambatan pengembalian hingga **60%**.
+- **Efisiensi Waktu Pelayanan:** Perlu diukur melalui observasi sebelum dan sesudah implementasi.
+- **Ketepatan Data Inventaris:** Perlu diverifikasi melalui rekonsiliasi stok fisik dengan data aplikasi.
+- **Penurunan Angka Keterlambatan:** Perlu dihitung dari data historis dengan periode pembanding yang jelas.
 - **Nir-Kertas (Paperless Office):** Mengeliminasi penggunaan buku formulir kertas secara total, mendukung inisiatif *eco-friendly school*.
 
 ### 7.3 Saran & Roadmap Pengembangan Lanjutan

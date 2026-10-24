@@ -26,7 +26,7 @@ require_once __DIR__ . '/../../includes/functions.php';
 $scriptDir = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? ''));
 $posAdmin = strpos($scriptDir, '/admin');
 $baseUrl = ($posAdmin !== false) ? substr($scriptDir, 0, $posAdmin) : '';
-$loginUrl = ($baseUrl !== '' ? $baseUrl : '') . '/admin/login.php';
+$loginUrl = ($baseUrl !== '' ? $baseUrl : '') . '/login.php';
 
 // Memastikan pengguna telah terautentikasi dan memiliki peranan admin atau petugas
 if (!isset($_SESSION['user_id'])) { 

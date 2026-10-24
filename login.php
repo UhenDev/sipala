@@ -261,7 +261,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$isLockedOut && isset($_POST['logi
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Masuk Siswa - SIPALA Lab Komputer RPL</title>
+    <title>Masuk - SIPALA Lab Komputer RPL</title>
     <link rel="icon" type="image/jpeg" href="assets/img/logo.jpg?v=2">
     <link rel="shortcut icon" type="image/jpeg" href="assets/img/logo.jpg?v=2">
     <link rel="apple-touch-icon" href="assets/img/logo.jpg?v=2">
@@ -662,7 +662,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$isLockedOut && isset($_POST['logi
 
         <div class="brand-body">
             <div class="brand-badge-siswa">
-                <span>👤 Portal Siswa / Peminjam</span>
+                <span>🔐 Portal Masuk SIPALA</span>
             </div>
             <p>
                 Platform pengelolaan inventaris dan sirkulasi peminjaman perangkat laboratorium Rekayasa Perangkat Lunak secara tertib, akuntabel, dan terdata.
@@ -684,9 +684,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$isLockedOut && isset($_POST['logi
         
         <div>
             <div class="form-head">
-                <span class="portal-badge">Peminjam Alat</span>
-                <h2>Masuk Akun Siswa</h2>
-                <p>Masukkan username atau NIS dan password yang terdaftar.</p>
+                <span class="portal-badge">Masuk Sistem</span>
+                <h2>Masuk ke Akun</h2>
+                <p>Masukkan username atau NIS dan password Anda.</p>
             </div>
 
             <!-- Pesan Kesalahan Autentikasi -->
@@ -706,7 +706,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$isLockedOut && isset($_POST['logi
                            id="usernameInput" 
                            name="username" 
                            class="form-control" 
-                           placeholder="Masukkan username atau NIS siswa" 
+                           placeholder="Masukkan username atau NIS" 
                            autocomplete="off"
                            autocorrect="off"
                            autocapitalize="none"
@@ -757,11 +757,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$isLockedOut && isset($_POST['logi
             <div class="foot-back">
                 <a href="index.php">&larr; Kembali ke Katalog Lab</a>
             </div>
-            <div class="admin-switch-box">
-                <a href="admin/login.php" class="admin-switch-btn">
-                    <span>🔐 Masuk sebagai Petugas / Admin</span> &rarr;
-                </a>
-            </div>
+
         </div>
 
     </div>
@@ -803,7 +799,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (window.Swal) {
                 Swal.fire({
                     title: 'Memproses Masuk...',
-                    text: 'Sedang memverifikasi data akun siswa.',
+                    text: 'Sedang memverifikasi data akun...',
                     allowOutsideClick: false,
                     allowEscapeKey: false,
                     showConfirmButton: false,
