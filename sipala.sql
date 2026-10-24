@@ -208,6 +208,35 @@ LOCK TABLES `peminjaman` WRITE;
 INSERT INTO `peminjaman` VALUES (1,'PJM-20261024-E2764',19,NULL,NULL,NULL,'2026-10-24','2026-10-24','2026-10-26',NULL,'untuk praktik','MENUNGGU',NULL,NULL,NULL,NULL,'2026-10-24 09:32:59','2026-10-24 09:32:59');
 /*!40000 ALTER TABLE `peminjaman` ENABLE KEYS */;
 UNLOCK TABLES;
+/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
+/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
+/*!50003 SET @saved_col_connection = @@collation_connection */ ;
+/*!50003 SET character_set_client  = cp850 */ ;
+/*!50003 SET character_set_results = cp850 */ ;
+/*!50003 SET collation_connection  = cp850_general_ci */ ;
+/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
+/*!50003 SET sql_mode              = 'NO_ZERO_IN_DATE,NO_ZERO_DATE,NO_ENGINE_SUBSTITUTION' */ ;
+DELIMITER ;;
+/*!50003 CREATE*/ /*!50017 DEFINER=`root`@`localhost`*/ /*!50003 TRIGGER trg_after_insert_peminjaman
+AFTER INSERT ON peminjaman
+FOR EACH ROW
+BEGIN
+    INSERT INTO log_aktivitas (user_id, aksi, modul, reference_id, aktivitas, deskripsi, created_at)
+    VALUES (
+        NEW.user_id, 
+        'INSERT_TRIGGER', 
+        'PEMINJAMAN', 
+        NEW.id,
+        'Pengajuan Baru Terbuat', 
+        CONCAT('Trigger Database: Transaksi baru tercatat dengan kode ', NEW.kode_peminjaman), 
+        NOW()
+    );
+END */;;
+DELIMITER ;
+/*!50003 SET sql_mode              = @saved_sql_mode */ ;
+/*!50003 SET character_set_client  = @saved_cs_client */ ;
+/*!50003 SET character_set_results = @saved_cs_results */ ;
+/*!50003 SET collation_connection  = @saved_col_connection */ ;
 
 --
 -- Table structure for table `pengaturan`
@@ -435,6 +464,60 @@ LOCK TABLES `users` WRITE;
 INSERT INTO `users` VALUES (1,'HENDRIK WILDANSYAH',NULL,'admin','$2y$10$q2fZ871iBT4xeoLE.e/34uNhaVl2giThHSyWNiaeSb8F54TEjYxZy','admin',NULL,'1707573134','0882002378557',NULL,'assets/uploads/profile/profile_1_20260917_101015.jpeg','aktif','2026-09-09 19:17:20','2026-09-17 08:10:15'),(18,'petugas','112233321','petugas','$2y$10$iWKbMkNBZRe.Ty4LuXxMHOW3yhIMeOpyEzGPdMXk47zoDJ.jmZ70C','petugas',NULL,NULL,'0881023805792',NULL,NULL,'aktif','2026-10-24 07:45:28','2026-10-24 07:45:28'),(19,'uhen','78965478','uhen','$2y$10$24ZtGm6ZnAGFcAvoZyyPs.nuES9vV0OzBj9q3q3VlGxnDvk8K0E7i','peminjam','12 RPL 2',NULL,'0881023805792','Sumedang',NULL,'aktif','2026-10-24 09:32:31','2026-10-24 09:32:31');
 /*!40000 ALTER TABLE `users` ENABLE KEYS */;
 UNLOCK TABLES;
+
+--
+-- Dumping routines for database 'sipala'
+--
+/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
+/*!50003 SET sql_mode              = 'NO_ZERO_IN_DATE,NO_ZERO_DATE,NO_ENGINE_SUBSTITUTION' */ ;
+/*!50003 DROP FUNCTION IF EXISTS `fn_hitung_denda` */;
+/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
+/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
+/*!50003 SET @saved_col_connection = @@collation_connection */ ;
+/*!50003 SET character_set_client  = cp850 */ ;
+/*!50003 SET character_set_results = cp850 */ ;
+/*!50003 SET collation_connection  = cp850_general_ci */ ;
+DELIMITER ;;
+CREATE DEFINER=`root`@`localhost` FUNCTION `fn_hitung_denda`(tgl_rencana DATE, tgl_kembali DATE, tarif INT) RETURNS int(11)
+    DETERMINISTIC
+BEGIN
+    DECLARE hari_telat INT;
+    SET hari_telat = DATEDIFF(tgl_kembali, tgl_rencana);
+    IF hari_telat > 0 THEN
+        RETURN hari_telat * tarif;
+    ELSE
+        RETURN 0;
+    END IF;
+END ;;
+DELIMITER ;
+/*!50003 SET sql_mode              = @saved_sql_mode */ ;
+/*!50003 SET character_set_client  = @saved_cs_client */ ;
+/*!50003 SET character_set_results = @saved_cs_results */ ;
+/*!50003 SET collation_connection  = @saved_col_connection */ ;
+/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
+/*!50003 SET sql_mode              = 'NO_ZERO_IN_DATE,NO_ZERO_DATE,NO_ENGINE_SUBSTITUTION' */ ;
+/*!50003 DROP PROCEDURE IF EXISTS `sp_rekap_peminjaman_alat` */;
+/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
+/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
+/*!50003 SET @saved_col_connection = @@collation_connection */ ;
+/*!50003 SET character_set_client  = cp850 */ ;
+/*!50003 SET character_set_results = cp850 */ ;
+/*!50003 SET collation_connection  = cp850_general_ci */ ;
+DELIMITER ;;
+CREATE DEFINER=`root`@`localhost` PROCEDURE `sp_rekap_peminjaman_alat`()
+BEGIN
+    SELECT 
+        COUNT(*) AS total_transaksi,
+        SUM(CASE WHEN status = 'DIPINJAM' THEN 1 ELSE 0 END) AS sedang_dipinjam,
+        SUM(CASE WHEN status = 'MENUNGGU' THEN 1 ELSE 0 END) AS menunggu_verifikasi,
+        SUM(CASE WHEN status = 'SELESAI' THEN 1 ELSE 0 END) AS selesai
+    FROM peminjaman;
+END ;;
+DELIMITER ;
+/*!50003 SET sql_mode              = @saved_sql_mode */ ;
+/*!50003 SET character_set_client  = @saved_cs_client */ ;
+/*!50003 SET character_set_results = @saved_cs_results */ ;
+/*!50003 SET collation_connection  = @saved_col_connection */ ;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
@@ -445,4 +528,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-10-24 17:43:26
+-- Dump completed on 2026-10-24 17:58:43
