@@ -538,7 +538,11 @@ page_start('Pengembalian Alat Lab', 'Proses pengembalian alat dan pengembalian s
                                 <span style="font-weight:700;"><?= $r['total_item'] ?></span> unit
                             </td>
                             <td>
-                                <?php if ($isLate && $diffDays > 0): ?>
+                                <?php if (($r['status'] ?? '') === 'MENUNGGU_PENGEMBALIAN'): ?>
+                                    <span class="badge" style="font-size:11px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;">
+                                        Menunggu Pengembalian
+                                    </span>
+                                <?php elseif ($isLate && $diffDays > 0): ?>
                                     <span class="badge DITOLAK" style="font-size:11px;">
                                         Terlambat <?= $diffDays ?> Hari
                                     </span>

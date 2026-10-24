@@ -359,6 +359,43 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && isset($_POST['action']) && 
     exit;
 }
 
+// PROSES KEMBALIKAN ALAT (OLEH SISWA/PEMINJAM)
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && isset($_POST['action']) && $_POST['action'] === 'return_loan') {
+    if (!verify_csrf()) {
+        $_SESSION['flash_error'] = 'Sesi form kedaluwarsa.';
+        header('Location: index.php');
+        exit;
+    }
+
+    $retId = (int)($_POST['loan_id'] ?? 0);
+    try {
+        $stChk = $pdo->prepare("SELECT id, kode_peminjaman, status, user_id FROM peminjaman WHERE id = ?");
+        $stChk->execute([$retId]);
+        $loanToReturn = $stChk->fetch();
+
+        if (!$loanToReturn) {
+            $_SESSION['flash_error'] = 'Data peminjaman tidak ditemukan.';
+        } elseif ($loanToReturn['status'] !== 'DIPINJAM') {
+            $_SESSION['flash_error'] = 'Hanya peminjaman berstatus DIPINJAM yang dapat diajukan pengembalian.';
+        } elseif (!$isLoggedIn || (int)$loanToReturn['user_id'] !== $userId) {
+            $_SESSION['flash_error'] = 'Anda tidak memiliki hak untuk mengembalikan transaksi ini.';
+        } else {
+            $updRet = $pdo->prepare("UPDATE peminjaman SET status = 'MENUNGGU_PENGEMBALIAN' WHERE id = ?");
+            $updRet->execute([$retId]);
+
+            audit_log('RETURN_REQUEST', 'PEMINJAMAN', $retId, "Siswa mengajukan pengembalian alat {$loanToReturn['kode_peminjaman']}", $userId);
+            notify_all_admins("Pengembalian Alat: {$loanToReturn['kode_peminjaman']}", "Siswa {$namaPengguna} mengajukan pengembalian alat. Silakan verifikasi fisik barang.", 'info', 'pengembalian/index.php');
+            $_SESSION['flash_error'] = '';
+            $_SESSION['login_success'] = 'Permohonan pengembalian ' . $loanToReturn['kode_peminjaman'] . ' berhasil dikirim! Silakan bawa alat fisik ke ruang lab untuk diserahkan ke petugas.';
+        }
+    } catch (Throwable $e) {
+        error_log('Gagal memproses pengembalian siswa: ' . $e->getMessage());
+        $_SESSION['flash_error'] = 'Gagal memproses pengembalian karena kendala sistem. Silakan coba lagi.';
+    }
+    header('Location: index.php');
+    exit;
+}
+
 // Data Peminjaman Siswa Login
 $myPendingLoans = [];
 $myApprovedLoans = [];
@@ -410,7 +447,7 @@ if ($isLoggedIn && $userId > 0) {
         LEFT JOIN detail_peminjaman d ON d.peminjaman_id = p.id 
         LEFT JOIN peralatan pr ON pr.id = d.peralatan_id
         LEFT JOIN unit_peralatan up ON up.id = d.unit_peralatan_id
-        WHERE p.user_id = ? AND p.status = "DIPINJAM" 
+        WHERE p.user_id = ? AND p.status IN ("DIPINJAM", "MENUNGGU_PENGEMBALIAN") 
         GROUP BY p.id, p.kode_peminjaman, p.tanggal_pinjam, p.tanggal_rencana_kembali, p.status, p.keperluan
         ORDER BY p.id DESC
     ');
@@ -916,16 +953,23 @@ $hasOfficialLogo = file_exists(__DIR__ . '/assets/img/logo.jpg');
                                     $estFine = $lateDays * $tarifDendaHarian;
                                 }
                                 ?>
-                                <div class="loan-item-card <?= $isLate ? 'overdue' : 'active-loan' ?>">
+                                <?php 
+                                $isPendingReturn = ($act['status'] === 'MENUNGGU_PENGEMBALIAN');
+                                ?>
+                                <div class="loan-item-card <?= $isLate ? 'overdue' : ($isPendingReturn ? 'pending' : 'active-loan') ?>">
                                     <div style="flex:1;">
                                         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                                            <strong style="font-family:var(--font-mono);color:#1e40af;font-size:14px;"><?= e($act['kode_peminjaman']) ?></strong>
-                                            <span class="status-badge DIPINJAM">Sedang Dipinjam</span>
+                                            <strong style="font-family:var(--font-mono);color:<?= $isPendingReturn ? '#92400e' : '#1e40af' ?>;font-size:14px;"><?= e($act['kode_peminjaman']) ?></strong>
+                                            <?php if ($isPendingReturn): ?>
+                                                <span class="status-badge MENUNGGU" style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;">Menunggu Konfirmasi Kembali</span>
+                                            <?php else: ?>
+                                                <span class="status-badge DIPINJAM">Sedang Dipinjam</span>
+                                            <?php endif; ?>
                                             <?php if ($isLate): ?>
                                                 <span class="status-badge DITOLAK">Terlambat <?= $lateDays ?> Hari</span>
                                             <?php endif; ?>
                                         </div>
-                                        <div style="font-size:13px;color:#1e3a8a;margin-top:4px;font-weight:700;">
+                                        <div style="font-size:13px;color:<?= $isPendingReturn ? '#92400e' : '#1e3a8a' ?>;margin-top:4px;font-weight:700;">
                                             Alat: <?= e($act['daftar_alat'] ?: ($act['total_item'] . ' item')) ?>
                                         </div>
                                         <div style="font-size:12px;color:<?= $isLate ? 'var(--color-danger)' : 'var(--color-text-secondary)' ?>;margin-top:2px;">
@@ -934,26 +978,40 @@ $hasOfficialLogo = file_exists(__DIR__ . '/assets/img/logo.jpg');
                                                 &bull; Estimasi Denda: <strong>Rp <?= number_format($estFine, 0, ',', '.') ?></strong>
                                             <?php endif; ?>
                                         </div>
-                                        <?php if ($isLate): ?>
+                                        <?php if ($isPendingReturn): ?>
+                                            <div style="font-size:11.5px;color:#92400e;margin-top:6px;background:#fffbeb;padding:6px 10px;border-radius:var(--radius-sm);border:1px solid #fde68a;">
+                                                Pengembalian telah diajukan. Silakan serahkan alat fisik ke meja petugas lab untuk dicek dan diselesaikan.
+                                            </div>
+                                        <?php elseif ($isLate): ?>
                                             <div style="font-size:11.5px;color:var(--color-danger);margin-top:6px;background:#fee2e2;padding:6px 10px;border-radius:var(--radius-sm);border:1px solid var(--color-danger-border);">
                                                 Peringatan: Peminjaman telah melewati tenggat! Segera kembalikan ke ruang laboratorium agar denda tidak terus bertambah.
                                             </div>
                                         <?php endif; ?>
                                     </div>
-                                    <div style="display:flex;gap:6px;align-items:center;">
+                                    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
                                         <button type="button" class="btn btn-sm" onclick="openStudentLoanDetail(<?= htmlspecialchars(json_encode([
                                             'kode' => $act['kode_peminjaman'],
-                                            'status' => 'DIPINJAM',
-                                            'status_label' => $isLate ? 'Terlambat ' . $lateDays . ' Hari' : 'Sedang Dipinjam',
-                                            'status_color' => $isLate ? '#b91c1c' : '#1d4ed8',
-                                            'status_bg' => $isLate ? '#fef2f2' : '#eff6ff',
+                                            'status' => $act['status'],
+                                            'status_label' => $isPendingReturn ? 'Menunggu Konfirmasi Pengembalian' : ($isLate ? 'Terlambat ' . $lateDays . ' Hari' : 'Sedang Dipinjam'),
+                                            'status_color' => $isPendingReturn ? '#b45309' : ($isLate ? '#b91c1c' : '#1d4ed8'),
+                                            'status_bg' => $isPendingReturn ? '#fef3c7' : ($isLate ? '#fef2f2' : '#eff6ff'),
                                             'alat' => $act['daftar_alat'] ?: ($act['total_item'] . ' item'),
                                             'keperluan' => $act['keperluan'],
                                             'tgl_pinjam' => date('d-m-Y', strtotime($act['tanggal_pinjam'])),
                                             'tgl_kembali' => date('d-m-Y', strtotime($act['tanggal_rencana_kembali'])),
                                             'est_denda' => $isLate ? 'Rp ' . number_format($estFine, 0, ',', '.') : 'Rp 0',
-                                            'instruksi' => $isLate ? 'Segera kembalikan ke Lab agar denda tidak terus berjalan!' : 'Harap menjaga kondisi alat dan mengembalikan tepat waktu.'
+                                            'instruksi' => $isPendingReturn ? 'Silakan serahkan alat fisik ke meja petugas lab.' : ($isLate ? 'Segera kembalikan ke Lab agar denda tidak terus berjalan!' : 'Harap menjaga kondisi alat dan mengembalikan tepat waktu.')
                                         ]), ENT_QUOTES, 'UTF-8') ?>)">Rincian</button>
+                                        <?php if (!$isPendingReturn): ?>
+                                            <form method="POST" action="index.php" onsubmit="return confirm('Apakah Anda ingin mengajukan pengembalian alat <?= e($act['kode_peminjaman']) ?>? Pastikan alat diserahkan ke meja petugas lab.');" style="margin:0;">
+                                                <?= csrf_field() ?>
+                                                <input type="hidden" name="action" value="return_loan">
+                                                <input type="hidden" name="loan_id" value="<?= $act['id'] ?>">
+                                                <button type="submit" class="btn btn-sm" style="background:#15803d;color:#ffffff;border-color:#15803d;font-weight:600;padding:5px 12px;">
+                                                    ↩ Kembalikan Alat
+                                                </button>
+                                            </form>
+                                        <?php endif; ?>
                                     </div>
                                 </div>
                             <?php endforeach; ?>

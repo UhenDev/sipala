@@ -10,6 +10,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/admin.php';
+require_admin();
 require_once __DIR__ . '/../../includes/qrcode.php';
 require_once __DIR__ . '/../../includes/barcode.php';
 

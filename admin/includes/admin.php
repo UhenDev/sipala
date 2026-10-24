@@ -559,21 +559,27 @@ function page_start(string $title, string $subtitle, string $active): void {
         <button type="button" class="sidebar-close-btn" id="sidebarClose" aria-label="Tutup Menu">&times;</button>
     </div>
     <nav class="menu">
-        <div class="menu-title">Operasional Lab</div>
+        <div class="menu-title">Operasional</div>
         <a class="menu-item <?= $active==='dashboard'?'active':''?>" href="<?= e($adminPrefix) ?>dashboard.php">
             <span class="menu-icon">&#x2302;</span><span>Dashboard</span>
         </a>
         <a class="menu-item <?= $active==='peminjaman'?'active':''?>" href="<?= e($adminPrefix) ?>peminjaman/index.php">
-            <span class="menu-icon">&#x21c4;</span><span>Peminjaman</span>
+            <span class="menu-icon">&#x21c4;</span><span><?= $role === 'petugas' ? 'Menyetujui Peminjaman' : 'Data Peminjaman' ?></span>
         </a>
         <a class="menu-item <?= $active==='pengembalian'?'active':''?>" href="<?= e($adminPrefix) ?>pengembalian/index.php">
-            <span class="menu-icon">&#x21a9;</span><span>Pengembalian & Denda</span>
+            <span class="menu-icon">&#x21a9;</span><span><?= $role === 'petugas' ? 'Memantau Pengembalian' : 'Data Pengembalian' ?></span>
+        </a>
+        <a class="menu-item <?= $active==='laporan'?'active':''?>" href="<?= e($adminPrefix) ?>laporan/index.php">
+            <span class="menu-icon">&#x25a7;</span><span><?= $role === 'petugas' ? 'Mencetak Laporan' : 'Cetak Laporan' ?></span>
+        </a>
+
+        <?php if ($role === 'admin'): ?>
+        <div class="menu-title" style="margin-top:14px;">Master Inventaris</div>
+        <a class="menu-item <?= $active==='peralatan'?'active':''?>" href="<?= e($adminPrefix) ?>peralatan/index.php">
+            <span class="menu-icon">&#x25a3;</span><span>CRUD Alat</span>
         </a>
         <a class="menu-item <?= $active==='kategori'?'active':''?>" href="<?= e($adminPrefix) ?>kategori/index.php">
-            <span class="menu-icon">&#x25a4;</span><span>Kategori</span>
-        </a>
-        <a class="menu-item <?= $active==='peralatan'?'active':''?>" href="<?= e($adminPrefix) ?>peralatan/index.php">
-            <span class="menu-icon">&#x25a3;</span><span>Master Peralatan</span>
+            <span class="menu-icon">&#x25a4;</span><span>CRUD Kategori</span>
         </a>
         <a class="menu-item <?= $active==='unit'?'active':''?>" href="<?= e($adminPrefix) ?>unit/index.php">
             <span class="menu-icon">&#x25a6;</span><span>Unit Alat Fisik</span>
@@ -581,17 +587,13 @@ function page_start(string $title, string $subtitle, string $active): void {
         <a class="menu-item <?= $active==='rfid'?'active':''?>" href="<?= e($adminPrefix) ?>rfid/index.php">
             <span class="menu-icon">&#x25ce;</span><span>Kartu RFID</span>
         </a>
-        <a class="menu-item <?= $active==='laporan'?'active':''?>" href="<?= e($adminPrefix) ?>laporan/index.php">
-            <span class="menu-icon">&#x25a7;</span><span>Laporan</span>
-        </a>
 
-        <?php if ($role === 'admin'): ?>
         <div class="menu-title" style="margin-top:14px;">Sistem & Otoritas</div>
         <a class="menu-item <?= $active==='pengguna'?'active':''?>" href="<?= e($adminPrefix) ?>pengguna/index.php">
-            <span class="menu-icon">&#x2659;</span><span>Kelola Pengguna</span>
+            <span class="menu-icon">&#x2659;</span><span>CRUD User</span>
         </a>
         <a class="menu-item <?= $active==='log'?'active':''?>" href="<?= e($adminPrefix) ?>log/index.php">
-            <span class="menu-icon">&#x25a5;</span><span>Audit Log</span>
+            <span class="menu-icon">&#x25a5;</span><span>Log Aktifitas</span>
         </a>
         <a class="menu-item <?= $active==='pengaturan'?'active':''?>" href="<?= e($adminPrefix) ?>pengaturan.php">
             <span class="menu-icon">&#x2699;</span><span>Pengaturan Lab</span>

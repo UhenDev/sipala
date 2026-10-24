@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/admin.php';
+require_admin();
 
 // Handle aksi POST (Tambah, Toggle Status, Hapus)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {

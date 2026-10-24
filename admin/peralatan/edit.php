@@ -15,6 +15,7 @@
  */
 
 require_once __DIR__ . '/../includes/admin.php';
+require_admin();
 
 $id = (int)($_GET['id'] ?? 0);
 $q = $pdo->prepare('SELECT p.*, k.nama_kategori FROM peralatan p LEFT JOIN kategori k ON k.id = p.kategori_id WHERE p.id = ?');

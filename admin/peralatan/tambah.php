@@ -13,6 +13,7 @@
  */
 
 require_once __DIR__ . '/../includes/admin.php';
+require_admin();
 
 // Endpoint AJAX untuk mendapatkan kode barang otomatis berikutnya
 if (isset($_GET['action']) && $_GET['action'] === 'get_code') {

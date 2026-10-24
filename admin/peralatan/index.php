@@ -19,6 +19,7 @@
  */
 
 require_once __DIR__ . '/../includes/admin.php';
+require_admin();
 require_once __DIR__ . '/../../includes/qrcode.php';
 
 // Menangani permintaan penghapusan master alat jika dikirim via POST
