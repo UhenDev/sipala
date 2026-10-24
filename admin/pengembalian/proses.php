@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../includes/admin.php';
+require_petugas();
 $id=(int)($_GET['id']??$_POST['id']??0);
 if($id<=0) redirect('index.php');
 if($_SERVER['REQUEST_METHOD']==='POST'){

@@ -20,6 +20,12 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
+if (($_SESSION['role'] ?? '') !== 'petugas') {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'message' => 'Akses ditolak: Pengiriman notifikasi WhatsApp adalah wewenang Petugas Laboratorium.']);
+    exit;
+}
+
 $phone = trim((string)($_POST['phone'] ?? ''));
 $message = trim((string)($_POST['message'] ?? ''));
 $peminjamanId = (int)($_POST['peminjaman_id'] ?? 0);

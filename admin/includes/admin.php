@@ -72,6 +72,18 @@ if (!function_exists('require_admin')) {
     }
 }
 
+if (!function_exists('require_petugas')) {
+    function require_petugas(): void {
+        if (($_SESSION['role'] ?? '') !== 'petugas') {
+            flash('error', 'Akses ditolak: Fitur ini adalah wewenang Petugas Laboratorium.');
+            $scriptDir = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? ''));
+            $posAdmin = strpos($scriptDir, '/admin');
+            $baseUrl = ($posAdmin !== false) ? substr($scriptDir, 0, $posAdmin) : '';
+            redirect(($baseUrl !== '' ? $baseUrl : '') . '/admin/dashboard.php');
+        }
+    }
+}
+
 function flash_html(): string { 
     $m = $_SESSION['flash_msg'] ?? ''; 
     $t = $_SESSION['flash_type'] ?? 'success'; 
@@ -566,12 +578,14 @@ function page_start(string $title, string $subtitle, string $active): void {
         <a class="menu-item <?= $active==='peminjaman'?'active':''?>" href="<?= e($adminPrefix) ?>peminjaman/index.php">
             <span class="menu-icon">&#x21c4;</span><span><?= $role === 'petugas' ? 'Menyetujui Peminjaman' : 'Data Peminjaman' ?></span>
         </a>
-        <a class="menu-item <?= $active==='pengembalian'?'active':''?>" href="<?= e($adminPrefix) ?>pengembalian/index.php">
+        <a class="menu-item <?= $active==='pengembalian'?'active':''?>" href="<?= e($adminPrefix) ?>pengembalian/index.php<?= $role === 'admin' ? '?tab=selesai' : '' ?>">
             <span class="menu-icon">&#x21a9;</span><span><?= $role === 'petugas' ? 'Memantau Pengembalian' : 'Data Pengembalian' ?></span>
         </a>
+        <?php if ($role === 'petugas'): ?>
         <a class="menu-item <?= $active==='laporan'?'active':''?>" href="<?= e($adminPrefix) ?>laporan/index.php">
-            <span class="menu-icon">&#x25a7;</span><span><?= $role === 'petugas' ? 'Mencetak Laporan' : 'Cetak Laporan' ?></span>
+            <span class="menu-icon">&#x25a7;</span><span>Mencetak Laporan</span>
         </a>
+        <?php endif; ?>
 
         <?php if ($role === 'admin'): ?>
         <div class="menu-title" style="margin-top:14px;">Master Inventaris</div>

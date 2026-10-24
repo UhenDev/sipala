@@ -9,6 +9,7 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/../includes/admin.php';
+require_petugas();
 
 // Ambil konfigurasi instansi dari database
 $namaInstansi = (string)($pdo->query("SELECT nilai FROM pengaturan WHERE nama = 'nama_instansi'")->fetchColumn() ?: 'SMKN 1 PANYINGKIRAN');

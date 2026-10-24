@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../includes/admin.php';
+require_petugas();
 require_once __DIR__ . '/../../includes/qrcode.php';
 require_once __DIR__ . '/../../includes/whatsapp.php';
 

@@ -123,8 +123,10 @@ page_start('Dashboard Laboratorium', 'Ringkasan operasional dan pemantauan inven
         <p><?= $isAdmin ? 'Ringkasan data inventaris alat fisik, permohonan peminjaman aktif, keterlambatan, dan log audit.' : 'Ringkasan operasional inventaris laboratorium, sirkulasi peminjaman, dan jatuh tempo.' ?></p>
     </div>
     <div class="actions">
-        <a class="btn" href="peminjaman/index.php">Daftar Peminjaman</a>
+        <a class="btn" href="peminjaman/index.php"><?= $isAdmin ? 'Data Peminjaman' : 'Daftar Peminjaman' ?></a>
+        <?php if (!$isAdmin): ?>
         <a class="btn btn-primary" href="peminjaman/tambah.php">+ Pinjamkan Alat</a>
+        <?php endif; ?>
     </div>
 </div>
 
@@ -296,7 +298,11 @@ page_start('Dashboard Laboratorium', 'Ringkasan operasional dan pemantauan inven
                                 </td>
                                 <td style="text-align:right;">
                                     <div class="actions" style="justify-content:flex-end;">
-                                        <a class="btn btn-sm btn-ok" href="peminjaman/index.php">Verifikasi</a>
+                                        <?php if ($isAdmin): ?>
+                                            <a class="btn btn-sm" href="peminjaman/detail.php?id=<?= $pl['id'] ?>">Detail</a>
+                                        <?php else: ?>
+                                            <a class="btn btn-sm btn-ok" href="peminjaman/index.php">Verifikasi</a>
+                                        <?php endif; ?>
                                     </div>
                                 </td>
                             </tr>
@@ -361,7 +367,7 @@ page_start('Dashboard Laboratorium', 'Ringkasan operasional dan pemantauan inven
                                     $waLink = $cleanPhone !== '' ? "https://wa.me/{$cleanPhone}?text=" . urlencode($waText) : '';
                                     ?>
                                     <div class="actions" style="justify-content:flex-end;gap:5px;">
-                                        <?php if ($waLink !== ''): ?>
+                                        <?php if ($waLink !== '' && !$isAdmin): ?>
                                             <a class="btn btn-sm" href="<?= $waLink ?>" target="_blank" rel="noopener"
                                                style="background:#22c55e;color:#ffffff;border:none;font-size:11px;padding:4px 8px;display:inline-flex;align-items:center;gap:4px;"
                                                title="Kirim pengingat WhatsApp ke <?= e($rawHp) ?>">
@@ -369,7 +375,11 @@ page_start('Dashboard Laboratorium', 'Ringkasan operasional dan pemantauan inven
                                                 WA
                                             </a>
                                         <?php endif; ?>
-                                        <a class="btn btn-sm btn-primary" href="pengembalian/index.php?rfid=<?= urlencode($ol['kode_peminjaman']) ?>">Terima</a>
+                                        <?php if ($isAdmin): ?>
+                                            <a class="btn btn-sm" href="peminjaman/detail.php?id=<?= $ol['id'] ?>">Detail</a>
+                                        <?php else: ?>
+                                            <a class="btn btn-sm btn-primary" href="pengembalian/index.php?rfid=<?= urlencode($ol['kode_peminjaman']) ?>">Terima</a>
+                                        <?php endif; ?>
                                     </div>
                                 </td>
                             </tr>

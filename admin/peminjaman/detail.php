@@ -127,7 +127,7 @@ page_start('Detail Peminjaman', 'Rincian transaksi & status validasi RFID', 'pem
         <p>Tanggal Pengajuan: <?= e(date('d-m-Y H:i', strtotime($p['tanggal_pengajuan']))) ?></p>
     </div>
     <div class="actions">
-        <?php if (!empty($p['no_hp'])): ?>
+        <?php if (!empty($p['no_hp']) && ($role ?? '') === 'petugas'): ?>
             <button type="button" class="btn" data-wa-target
                     data-wa-id="<?= $p['id'] ?>"
                     data-wa-nama="<?= e($p['nama_peminjam'] ?? '') ?>"

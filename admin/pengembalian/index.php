@@ -23,7 +23,8 @@ require_once __DIR__ . '/../../includes/whatsapp.php';
 $tarifDendaHarian = (int)($pdo->query("SELECT nilai FROM pengaturan WHERE nama = 'tarif_denda_harian'")->fetchColumn() ?: 1000);
 
 $rfidSearch = trim((string)($_GET['rfid'] ?? ''));
-$tab = trim((string)($_GET['tab'] ?? 'aktif')); // 'aktif' atau 'selesai'
+$userRole = (string)($_SESSION['role'] ?? '');
+$tab = ($userRole === 'admin') ? 'selesai' : trim((string)($_GET['tab'] ?? 'aktif')); // Admin default 'selesai', Petugas 'aktif'
 
 // Handle pelunasan denda terpisah via POST
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'bayar_denda') {
@@ -69,6 +70,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 // Handle konfirmasi pengembalian via POST
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id'])) {
     require_csrf();
+    if ($userRole === 'admin') {
+        flash('error', 'Akses ditolak: Pemrosesan penerimaan pengembalian adalah wewenang Petugas Laboratorium.');
+        redirect('index.php?tab=selesai');
+    }
     $id = (int)$_POST['id'];
     $kondisi = (string)($_POST['kondisi_barang'] ?? 'Baik');
     $catatan = trim((string)($_POST['catatan'] ?? ''));
@@ -305,16 +310,21 @@ $stmtSelesai = $pdo->prepare($sqlSelesai);
 $stmtSelesai->execute($paramsSelesai);
 $rowsSelesai = $stmtSelesai->fetchAll();
 
-page_start('Pengembalian Alat Lab', 'Proses pengembalian alat dan pengembalian stok lab', 'pengembalian');
+if ($userRole === 'admin') {
+    page_start('Data Pengembalian', 'Kelola riwayat dan arsip data pengembalian laboratorium', 'pengembalian');
+} else {
+    page_start('Memantau Pengembalian', 'Pantau sirkulasi alat aktif, proses pengembalian, dan denda', 'pengembalian');
+}
 ?>
 
 <div class="head">
     <div>
-        <h2>Data Pengembalian Alat Laboratorium</h2>
-        <p>Penerimaan pengembalian alat, verifikasi kondisi fisik, kalkulasi denda, dan sinkronisasi stok lab.</p>
+        <h2><?= $userRole === 'admin' ? 'Data Pengembalian Alat Laboratorium' : 'Memantau Pengembalian Alat' ?></h2>
+        <p><?= $userRole === 'admin' ? 'Pengawasan riwayat alat yang telah dikembalikan, audit pelunasan denda, dan arsip lab.' : 'Penerimaan pengembalian alat, verifikasi kondisi fisik, kalkulasi denda, dan sinkronisasi stok lab.' ?></p>
     </div>
 </div>
 
+<?php if ($userRole === 'petugas'): ?>
 <!-- BARCODE SCANNER PENGEMBALIAN ALAT (USB HID) -->
 <div class="panel" style="margin-bottom:20px;border:1px solid #cbd5e1;box-shadow:0 2px 8px rgba(0,0,0,0.04);background:linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);">
     <div style="padding:18px 22px;">
@@ -378,6 +388,7 @@ page_start('Pengembalian Alat Lab', 'Proses pengembalian alat dan pengembalian s
         <div id="barcodeReturnFeedback" style="display:none;margin-top:14px;"></div>
     </div>
 </div>
+<?php endif; ?>
 
 <!-- SEARCH & SCAN CONSOLE PENGEMBALIAN -->
 <div class="panel" style="margin-bottom:22px;border:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
@@ -465,17 +476,19 @@ page_start('Pengembalian Alat Lab', 'Proses pengembalian alat dan pengembalian s
     </div>
 </div>
 
+<?php if ($userRole === 'petugas'): ?>
 <!-- TAB PILIHAN: PEMINJAMAN AKTIF VS RIWAYAT SELESAI -->
 <div style="display:flex;gap:8px;margin-bottom:18px;border-bottom:1px solid #dfe3e8;padding-bottom:10px;">
     <a href="index.php?tab=aktif<?= $rfidSearch !== '' ? '&rfid=' . urlencode($rfidSearch) : '' ?>" 
        class="btn <?= $tab === 'aktif' ? 'btn-primary' : '' ?>" style="font-weight:600;">
-        Peminjaman Aktif (<?= count($rowsAktif) ?>)
+        Memantau Peminjaman Aktif (<?= count($rowsAktif) ?>)
     </a>
     <a href="index.php?tab=selesai<?= $rfidSearch !== '' ? '&rfid=' . urlencode($rfidSearch) : '' ?>" 
        class="btn <?= $tab === 'selesai' ? 'btn-primary' : '' ?>" style="font-weight:600;">
         Riwayat Selesai Dikembalikan (<?= count($rowsSelesai) ?>)
     </a>
 </div>
+<?php endif; ?>
 
 <!-- =========================================================
      TABEL 1: PEMINJAMAN AKTIF (BELUM KEMBALI)
@@ -555,26 +568,30 @@ page_start('Pengembalian Alat Lab', 'Proses pengembalian alat dan pengembalian s
                             </td>
                             <td>
                                 <div class="actions" style="gap:5px;">
-                                    <?php 
-                                    $rawHp = (string)($r['no_hp'] ?? '');
-                                    ?>
-                                    <?php if ($rawHp !== ''): ?>
-                                        <button type="button" class="btn btn-sm" data-wa-target
-                                                data-wa-id="<?= $r['id'] ?>"
-                                                data-wa-nama="<?= e($r['nama_peminjam'] ?? '') ?>"
-                                                data-wa-kelas="<?= e($r['kelas'] ?? '') ?>"
-                                                data-wa-phone="<?= e($rawHp) ?>"
-                                                data-wa-kode="<?= e($r['kode_peminjaman']) ?>"
-                                                data-wa-kembali="<?= e(date('d-m-Y', strtotime($r['tanggal_rencana_kembali']))) ?>"
-                                                data-wa-type="<?= ($isLate && $diffDays > 0) ? 'terlambat' : 'pengingat' ?>"
-                                                style="background:#22c55e;color:#ffffff;border:none;display:inline-flex;align-items:center;gap:4px;padding:4px 8px;font-size:11px;font-weight:700;"
-                                                title="Kirim pesan WhatsApp ke <?= e($rawHp) ?>">
-                                            📱 WA
+                                    <?php if ($userRole === 'petugas'): ?>
+                                        <?php 
+                                        $rawHp = (string)($r['no_hp'] ?? '');
+                                        ?>
+                                        <?php if ($rawHp !== ''): ?>
+                                            <button type="button" class="btn btn-sm" data-wa-target
+                                                    data-wa-id="<?= $r['id'] ?>"
+                                                    data-wa-nama="<?= e($r['nama_peminjam'] ?? '') ?>"
+                                                    data-wa-kelas="<?= e($r['kelas'] ?? '') ?>"
+                                                    data-wa-phone="<?= e($rawHp) ?>"
+                                                    data-wa-kode="<?= e($r['kode_peminjaman']) ?>"
+                                                    data-wa-kembali="<?= e(date('d-m-Y', strtotime($r['tanggal_rencana_kembali']))) ?>"
+                                                    data-wa-type="<?= ($isLate && $diffDays > 0) ? 'terlambat' : 'pengingat' ?>"
+                                                    style="background:#22c55e;color:#ffffff;border:none;display:inline-flex;align-items:center;gap:4px;padding:4px 8px;font-size:11px;font-weight:700;"
+                                                    title="Kirim pesan WhatsApp ke <?= e($rawHp) ?>">
+                                                📱 WA
+                                            </button>
+                                        <?php endif; ?>
+                                        <button type="button" class="btn btn-sm btn-ok" onclick="openReturnModal(<?= $r['id'] ?>, '<?= e($r['kode_peminjaman']) ?>', '<?= e($r['nama_peminjam']) ?>', <?= $diffDays ?>, <?= !empty($r['single_unit_id']) ? "{ id: " . (int)$r['single_unit_id'] . ", barcode: '" . e($r['single_unit_barcode']) . "', nama_barang: '" . e($r['single_tool_name']) . "' }" : "null" ?>)">
+                                            Terima Pengembalian
                                         </button>
+                                    <?php else: ?>
+                                        <a class="btn btn-sm" href="../peminjaman/detail.php?id=<?= $r['id'] ?>">Detail</a>
                                     <?php endif; ?>
-                                    <button type="button" class="btn btn-sm btn-ok" onclick="openReturnModal(<?= $r['id'] ?>, '<?= e($r['kode_peminjaman']) ?>', '<?= e($r['nama_peminjam']) ?>', <?= $diffDays ?>, <?= !empty($r['single_unit_id']) ? "{ id: " . (int)$r['single_unit_id'] . ", barcode: '" . e($r['single_unit_barcode']) . "', nama_barang: '" . e($r['single_tool_name']) . "' }" : "null" ?>)">
-                                        Terima Pengembalian
-                                    </button>
                                 </div>
                             </td>
                         </tr>
@@ -699,6 +716,7 @@ page_start('Pengembalian Alat Lab', 'Proses pengembalian alat dan pengembalian s
 </div>
 <?php endif; ?>
 
+<?php if ($userRole === 'petugas'): ?>
 <!-- MODAL TERIMA PENGEMBALIAN -->
 <div class="modal" id="returnModal">
     <div class="modal-box">
@@ -769,6 +787,7 @@ page_start('Pengembalian Alat Lab', 'Proses pengembalian alat dan pengembalian s
         </form>
     </div>
 </div>
+<?php endif; ?>
 
 <!-- MODAL PELUNASAN DENDA -->
 <div class="modal" id="payFineModal">

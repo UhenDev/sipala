@@ -34,6 +34,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     require_csrf();
     $id = (int)($_POST['id'] ?? 0);
     $act = (string)($_POST['action'] ?? '');
+
+    if (in_array($act, ['approve', 'reject', 'borrow'], true) && (($_SESSION['role'] ?? '') === 'admin')) {
+        flash('error', 'Akses ditolak: Persetujuan dan serah terima peminjaman adalah wewenang Petugas Laboratorium.');
+        redirect('index.php');
+    }
     $rfidTap = trim((string)($_POST['rfid_tap'] ?? ''));
     $isManual = !empty($_POST['is_manual']);
 
@@ -399,17 +404,19 @@ $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $rows = $stmt->fetchAll();
 
-page_start('Peminjaman Alat Lab', 'Kelola transaksi peminjaman dan verifikasi fisik', 'peminjaman');
+page_start(($role ?? '') === 'petugas' ? 'Menyetujui Peminjaman' : 'Data Peminjaman', 'Kelola data transaksi peminjaman alat laboratorium', 'peminjaman');
 ?>
 
 <div class="head">
     <div>
-        <h2>Data Transaksi Peminjaman</h2>
-        <p>Pencatatan peminjaman alat laboratorium, persetujuan pengajuan, dan verifikasi fisik serah terima.</p>
+        <h2><?= ($role ?? '') === 'petugas' ? 'Menyetujui Peminjaman' : 'Data Transaksi Peminjaman' ?></h2>
+        <p><?= ($role ?? '') === 'petugas' ? 'Pemeriksaan pengajuan peminjaman siswa, persetujuan, dan verifikasi fisik serah terima.' : 'Pengawasan dan arsip seluruh data transaksi peminjaman laboratorium.' ?></p>
     </div>
+    <?php if (($role ?? '') === 'petugas'): ?>
     <div class="actions">
         <a class="btn btn-primary" href="tambah.php">+ Peminjaman Baru (Scan RFID / Manual)</a>
     </div>
+    <?php endif; ?>
 </div>
 
 <!-- KONSOL PENCARIAN & PEMINDAIAN TRANSAKSI -->
@@ -609,48 +616,49 @@ page_start('Peminjaman Alat Lab', 'Kelola transaksi peminjaman dan verifikasi fi
                                 <div class="actions" style="justify-content:flex-end;">
                                     <a class="btn btn-sm" href="detail.php?id=<?= $r['id'] ?>">Detail</a>
                                     
-                                    <?php 
-                                    $isOverdue = ($r['status'] === 'DIPINJAM' && !empty($r['tanggal_rencana_kembali']) && date('Y-m-d') > $r['tanggal_rencana_kembali']);
-                                    $rawHp = (string)($r['no_hp'] ?? '');
-                                    ?>
-                                    <?php if ($rawHp !== ''): ?>
-                                        <button type="button" class="btn btn-sm" data-wa-target
-                                                data-wa-id="<?= $r['id'] ?>"
-                                                data-wa-nama="<?= e($r['nama_peminjam'] ?? '') ?>"
-                                                data-wa-kelas="<?= e($r['kelas'] ?? '') ?>"
-                                                data-wa-phone="<?= e($rawHp) ?>"
-                                                data-wa-kode="<?= e($r['kode_peminjaman']) ?>"
-                                                data-wa-alat="<?= e($r['daftar_alat'] ?? 'Alat Lab') ?>"
-                                                data-wa-kembali="<?= e(date('d-m-Y', strtotime($r['tanggal_rencana_kembali']))) ?>"
-                                                data-wa-type="<?= $isOverdue ? 'terlambat' : ($r['status'] === 'MENUNGGU' ? 'disetujui' : 'pengingat') ?>"
-                                                style="background:#22c55e;color:#ffffff;border:none;display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;"
-                                                title="Kirim pesan via Bot WhatsApp ke <?= e($rawHp) ?>">
-                                            📱 WA
-                                        </button>
-                                    <?php endif; ?>
+                                    <?php if (($role ?? '') === 'petugas'): ?>
+                                        <?php 
+                                        $isOverdue = ($r['status'] === 'DIPINJAM' && !empty($r['tanggal_rencana_kembali']) && date('Y-m-d') > $r['tanggal_rencana_kembali']);
+                                        $rawHp = (string)($r['no_hp'] ?? '');
+                                        ?>
+                                        <?php if ($rawHp !== ''): ?>
+                                            <button type="button" class="btn btn-sm" data-wa-target
+                                                    data-wa-id="<?= $r['id'] ?>"
+                                                    data-wa-nama="<?= e($r['nama_peminjam'] ?? '') ?>"
+                                                    data-wa-kelas="<?= e($r['kelas'] ?? '') ?>"
+                                                    data-wa-phone="<?= e($rawHp) ?>"
+                                                    data-wa-kode="<?= e($r['kode_peminjaman']) ?>"
+                                                    data-wa-alat="<?= e($r['daftar_alat'] ?? 'Alat Lab') ?>"
+                                                    data-wa-kembali="<?= e(date('d-m-Y', strtotime($r['tanggal_rencana_kembali']))) ?>"
+                                                    data-wa-type="<?= $isOverdue ? 'terlambat' : ($r['status'] === 'MENUNGGU' ? 'disetujui' : 'pengingat') ?>"
+                                                    style="background:#22c55e;color:#ffffff;border:none;display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;"
+                                                    title="Kirim pesan via Bot WhatsApp ke <?= e($rawHp) ?>">
+                                                📱 WA
+                                            </button>
+                                        <?php endif; ?>
 
-                                    
-                                    <?php if ($r['status'] === 'MENUNGGU'): ?>
-                                        <form method="post" id="form_approve_<?= $r['id'] ?>" style="display:inline;">
-                                            <?= csrf_field() ?>
-                                            <input type="hidden" name="id" value="<?= $r['id'] ?>">
-                                            <input type="hidden" name="action" value="approve">
-                                            <button type="button" class="btn btn-sm btn-ok" onclick="confirmAction('form_approve_<?= $r['id'] ?>', 'Setujui Pengajuan?', 'Setujui pengajuan peminjaman untuk <?= e(addslashes($r['nama_peminjam'] ?? '')) ?>?', 'Ya, Setujui', '#10b981')">Setujui</button>
-                                        </form>
-                                        <form method="post" id="form_reject_<?= $r['id'] ?>" style="display:inline;">
-                                            <?= csrf_field() ?>
-                                            <input type="hidden" name="id" value="<?= $r['id'] ?>">
-                                            <input type="hidden" name="action" value="reject">
-                                            <button type="button" class="btn btn-sm btn-danger" onclick="confirmAction('form_reject_<?= $r['id'] ?>', 'Tolak Pengajuan?', 'Tolak pengajuan peminjaman untuk <?= e(addslashes($r['nama_peminjam'] ?? '')) ?>?', 'Ya, Tolak', '#ef4444')">Tolak</button>
-                                        </form>
-                                    <?php elseif (in_array($r['status'], ['DISETUJUI', 'SIAP_DIAMBIL'], true)): 
-                                        $loanItemsData = $allDetailsGrouped[(int)$r['id']] ?? [];
-                                    ?>
-                                        <button type="button" class="btn btn-sm btn-primary" 
-                                                data-loan-items="<?= htmlspecialchars(json_encode($loanItemsData), ENT_QUOTES, 'UTF-8') ?>"
-                                                onclick="openHandoverModal(<?= $r['id'] ?>, '<?= e($r['kode_peminjaman']) ?>', '<?= e(addslashes($r['nama_peminjam'] ?? 'Siswa')) ?>', '<?= e($r['nis'] ?: '-') ?>', '<?= e($r['kelas'] ?: '-') ?>', '<?= e($r['user_rfid'] ?: '') ?>', this.dataset.loanItems)">
-                                            Serahkan Alat
-                                        </button>
+                                        <?php if ($r['status'] === 'MENUNGGU'): ?>
+                                            <form method="post" id="form_approve_<?= $r['id'] ?>" style="display:inline;">
+                                                <?= csrf_field() ?>
+                                                <input type="hidden" name="id" value="<?= $r['id'] ?>">
+                                                <input type="hidden" name="action" value="approve">
+                                                <button type="button" class="btn btn-sm btn-ok" onclick="confirmAction('form_approve_<?= $r['id'] ?>', 'Setujui Pengajuan?', 'Setujui pengajuan peminjaman untuk <?= e(addslashes($r['nama_peminjam'] ?? '')) ?>?', 'Ya, Setujui', '#10b981')">Setujui</button>
+                                            </form>
+                                            <form method="post" id="form_reject_<?= $r['id'] ?>" style="display:inline;">
+                                                <?= csrf_field() ?>
+                                                <input type="hidden" name="id" value="<?= $r['id'] ?>">
+                                                <input type="hidden" name="action" value="reject">
+                                                <button type="button" class="btn btn-sm btn-danger" onclick="confirmAction('form_reject_<?= $r['id'] ?>', 'Tolak Pengajuan?', 'Tolak pengajuan peminjaman untuk <?= e(addslashes($r['nama_peminjam'] ?? '')) ?>?', 'Ya, Tolak', '#ef4444')">Tolak</button>
+                                            </form>
+                                        <?php elseif (in_array($r['status'], ['DISETUJUI', 'SIAP_DIAMBIL'], true)): 
+                                            $loanItemsData = $allDetailsGrouped[(int)$r['id']] ?? [];
+                                        ?>
+                                            <button type="button" class="btn btn-sm btn-primary" 
+                                                    data-loan-items="<?= htmlspecialchars(json_encode($loanItemsData), ENT_QUOTES, 'UTF-8') ?>"
+                                                    onclick="openHandoverModal(<?= $r['id'] ?>, '<?= e($r['kode_peminjaman']) ?>', '<?= e(addslashes($r['nama_peminjam'] ?? 'Siswa')) ?>', '<?= e($r['nis'] ?: '-') ?>', '<?= e($r['kelas'] ?: '-') ?>', '<?= e($r['user_rfid'] ?: '') ?>', this.dataset.loanItems)">
+                                                Serahkan Alat
+                                            </button>
+                                        <?php endif; ?>
                                     <?php endif; ?>
                                 </div>
                             </td>
